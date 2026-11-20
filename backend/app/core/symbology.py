@@ -1,10 +1,10 @@
-"""ISO 10383 MIC registry and effective-dated exchange/ticker mapping (Phase 1 + Phase 7 Global).
+"""ISO 10383 MIC registry and effective-dated exchange/ticker mapping (v1.1.0).
 
 Covers:
-  - Phase 1 Core: NYSE (XNYS), NASDAQ (XNAS), HOSE (XSTC), HNX (XHAI -> XSTC effective 2026-12-28).
-  - Phase 7 Global Expansion: LSE (XLON), Xetra (XETR), Euronext Paris (XPAR), SIX Swiss (XSWX),
-    Borsa Italiana (XMIL), Tokyo (XTKS), Hong Kong (XHKG), Korea (XKRX), Singapore (XSES),
-    Malaysia (XKLS), Indonesia (XIDX), Thailand (XBKK), and Australia (XASX).
+  - United States: NYSE (XNYS), NASDAQ (XNAS).
+  - Vietnam: Full VN30 + key HOSE (XSTC) and HNX (XHAI -> XSTC effective 2026-12-28) equities.
+  - Global Expansion: Europe (XLON, XETR, XPAR, XSWX, XMIL), Asia (XTKS, XHKG, XKRX),
+    ASEAN (XSES, XKLS, XIDX, XBKK), and Oceania (XASX).
 """
 
 from __future__ import annotations
@@ -73,42 +73,108 @@ YFINANCE_SUFFIX_BY_MIC: Dict[str, str] = {
     "XASX": ".AX",
 }
 
+
+def _vn_hose(ticker: str, name: str, sector: str) -> Instrument:
+    return Instrument(
+        instrument_id=f"XSTC:{ticker}",
+        ticker=ticker,
+        exchange_mic="XSTC",
+        exchange_acronym="HOSE",
+        company_name=name,
+        country="Vietnam",
+        currency="VND",
+        sector=sector,
+        industry=sector,
+        asset_type=AssetType.EQUITY,
+        timezone="Asia/Ho_Chi_Minh",
+    )
+
+
+def _vn_hnx(ticker: str, name: str, sector: str) -> Instrument:
+    return Instrument(
+        instrument_id=f"XHAI:{ticker}",
+        ticker=ticker,
+        exchange_mic="XHAI",
+        exchange_acronym="HNX",
+        company_name=name,
+        country="Vietnam",
+        currency="VND",
+        sector=sector,
+        industry=sector,
+        asset_type=AssetType.EQUITY,
+        timezone="Asia/Ho_Chi_Minh",
+        migration_note="Scheduled transfer from HNX (XHAI) to HOSE (XSTC) effective 2026-12-28.",
+    )
+
+
 GLOBAL_INSTRUMENTS: List[Instrument] = [
-    # --- Phase 1: United States ---
+    # --- United States ---
     Instrument(instrument_id="XNAS:AAPL", ticker="AAPL", exchange_mic="XNAS", exchange_acronym="NASDAQ", company_name="Apple Inc.", country="United States", currency="USD", sector="Technology", industry="Consumer Electronics", asset_type=AssetType.EQUITY, timezone="America/New_York"),
-    Instrument(instrument_id="XNAS:MSFT", ticker="MSFT", exchange_mic="XNAS", exchange_acronym="NASDAQ", company_name="Microsoft Corporation", country="United States", currency="USD", sector="Technology", industry="Software - Infrastructure", asset_type=AssetType.EQUITY, timezone="America/New_York"),
+    Instrument(instrument_id="XNAS:MSFT", ticker="MSFT", exchange_mic="XNAS", exchange_acronym="NASDAQ", company_name="Microsoft Corporation", country="United States", currency="USD", sector="Technology", industry="Software", asset_type=AssetType.EQUITY, timezone="America/New_York"),
+    Instrument(instrument_id="XNAS:GOOGL", ticker="GOOGL", exchange_mic="XNAS", exchange_acronym="NASDAQ", company_name="Alphabet Inc. Class A", country="United States", currency="USD", sector="Communication Services", industry="Internet Content", asset_type=AssetType.EQUITY, timezone="America/New_York"),
     Instrument(instrument_id="XNAS:NVDA", ticker="NVDA", exchange_mic="XNAS", exchange_acronym="NASDAQ", company_name="NVIDIA Corporation", country="United States", currency="USD", sector="Technology", industry="Semiconductors", asset_type=AssetType.EQUITY, timezone="America/New_York"),
+    Instrument(instrument_id="XNAS:AMZN", ticker="AMZN", exchange_mic="XNAS", exchange_acronym="NASDAQ", company_name="Amazon.com, Inc.", country="United States", currency="USD", sector="Consumer Cyclical", industry="Internet Retail", asset_type=AssetType.EQUITY, timezone="America/New_York"),
+    Instrument(instrument_id="XNAS:META", ticker="META", exchange_mic="XNAS", exchange_acronym="NASDAQ", company_name="Meta Platforms, Inc.", country="United States", currency="USD", sector="Communication Services", industry="Internet Content", asset_type=AssetType.EQUITY, timezone="America/New_York"),
     Instrument(instrument_id="XNAS:TSLA", ticker="TSLA", exchange_mic="XNAS", exchange_acronym="NASDAQ", company_name="Tesla, Inc.", country="United States", currency="USD", sector="Consumer Cyclical", industry="Auto Manufacturers", asset_type=AssetType.EQUITY, timezone="America/New_York"),
-    Instrument(instrument_id="XNYS:JPM", ticker="JPM", exchange_mic="XNYS", exchange_acronym="NYSE", company_name="JPMorgan Chase & Co.", country="United States", currency="USD", sector="Financial Services", industry="Banks - Diversified", asset_type=AssetType.EQUITY, timezone="America/New_York"),
-    Instrument(instrument_id="XNYS:BRK.B", ticker="BRK.B", exchange_mic="XNYS", exchange_acronym="NYSE", company_name="Berkshire Hathaway Inc. Class B", country="United States", currency="USD", sector="Financial Services", industry="Insurance - Diversified", asset_type=AssetType.EQUITY, timezone="America/New_York"),
-    Instrument(instrument_id="XNYS:SPY", ticker="SPY", exchange_mic="XNYS", exchange_acronym="NYSE", company_name="SPDR S&P 500 ETF Trust", country="United States", currency="USD", sector="Broad Market", industry="Exchange Traded Fund", asset_type=AssetType.ETF, timezone="America/New_York"),
-    Instrument(instrument_id="XNYS:VNM", ticker="VNM", exchange_mic="XNYS", exchange_acronym="NYSE", company_name="VanEck Vietnam ETF", country="United States", currency="USD", sector="International Equity", industry="Exchange Traded Fund", asset_type=AssetType.ETF, timezone="America/New_York"),
-    # --- Phase 1: Vietnam ---
-    Instrument(instrument_id="XSTC:FPT", ticker="FPT", exchange_mic="XSTC", exchange_acronym="HOSE", company_name="FPT Corporation", country="Vietnam", currency="VND", sector="Technology", industry="Information Technology Services", asset_type=AssetType.EQUITY, timezone="Asia/Ho_Chi_Minh"),
-    Instrument(instrument_id="XSTC:VNM", ticker="VNM", exchange_mic="XSTC", exchange_acronym="HOSE", company_name="Vietnam Dairy Products JSC (Vinamilk)", country="Vietnam", currency="VND", sector="Consumer Defensive", industry="Packaged Foods", asset_type=AssetType.EQUITY, timezone="Asia/Ho_Chi_Minh"),
-    Instrument(instrument_id="XSTC:HPG", ticker="HPG", exchange_mic="XSTC", exchange_acronym="HOSE", company_name="Hoa Phat Group JSC", country="Vietnam", currency="VND", sector="Basic Materials", industry="Steel", asset_type=AssetType.EQUITY, timezone="Asia/Ho_Chi_Minh"),
-    Instrument(instrument_id="XSTC:VCB", ticker="VCB", exchange_mic="XSTC", exchange_acronym="HOSE", company_name="Joint Stock Commercial Bank for Foreign Trade of Vietnam (Vietcombank)", country="Vietnam", currency="VND", sector="Financial Services", industry="Banks - Regional", asset_type=AssetType.EQUITY, timezone="Asia/Ho_Chi_Minh"),
-    Instrument(instrument_id="XSTC:VIC", ticker="VIC", exchange_mic="XSTC", exchange_acronym="HOSE", company_name="Vingroup JSC", country="Vietnam", currency="VND", sector="Real Estate", industry="Real Estate - Diversified", asset_type=AssetType.EQUITY, timezone="Asia/Ho_Chi_Minh"),
-    Instrument(instrument_id="XHAI:SHS", ticker="SHS", exchange_mic="XHAI", exchange_acronym="HNX", company_name="Saigon - Hanoi Securities JSC", country="Vietnam", currency="VND", sector="Financial Services", industry="Capital Markets", asset_type=AssetType.EQUITY, timezone="Asia/Ho_Chi_Minh", migration_note="Scheduled transfer from HNX (XHAI) to HOSE (XSTC) effective 2026-12-28."),
-    Instrument(instrument_id="XHAI:PVS", ticker="PVS", exchange_mic="XHAI", exchange_acronym="HNX", company_name="PetroVietnam Technical Services Corporation", country="Vietnam", currency="VND", sector="Energy", industry="Oil & Gas Equipment & Services", asset_type=AssetType.EQUITY, timezone="Asia/Ho_Chi_Minh", migration_note="Scheduled transfer from HNX (XHAI) to HOSE (XSTC) effective 2026-12-28."),
-    Instrument(instrument_id="XHAI:IDC", ticker="IDC", exchange_mic="XHAI", exchange_acronym="HNX", company_name="IDICO Corporation - JSC", country="Vietnam", currency="VND", sector="Industrials", industry="Industrial Parks & Infrastructure", asset_type=AssetType.EQUITY, timezone="Asia/Ho_Chi_Minh", migration_note="Scheduled transfer from HNX (XHAI) to HOSE (XSTC) effective 2026-12-28."),
-    # --- Phase 7: Europe ---
-    Instrument(instrument_id="XLON:HSBA", ticker="HSBA", exchange_mic="XLON", exchange_acronym="LSE", company_name="HSBC Holdings plc", country="United Kingdom", currency="GBP", sector="Financial Services", industry="Banks - Diversified", asset_type=AssetType.EQUITY, timezone="Europe/London"),
-    Instrument(instrument_id="XETR:SAP", ticker="SAP", exchange_mic="XETR", exchange_acronym="Xetra", company_name="SAP SE", country="Germany", currency="EUR", sector="Technology", industry="Software - Application", asset_type=AssetType.EQUITY, timezone="Europe/Berlin"),
+    Instrument(instrument_id="XNYS:JPM", ticker="JPM", exchange_mic="XNYS", exchange_acronym="NYSE", company_name="JPMorgan Chase & Co.", country="United States", currency="USD", sector="Financial Services", industry="Banks", asset_type=AssetType.EQUITY, timezone="America/New_York"),
+    Instrument(instrument_id="XNYS:BRK.B", ticker="BRK.B", exchange_mic="XNYS", exchange_acronym="NYSE", company_name="Berkshire Hathaway Inc. Class B", country="United States", currency="USD", sector="Financial Services", industry="Insurance", asset_type=AssetType.EQUITY, timezone="America/New_York"),
+    Instrument(instrument_id="XNYS:SPY", ticker="SPY", exchange_mic="XNYS", exchange_acronym="NYSE", company_name="SPDR S&P 500 ETF Trust", country="United States", currency="USD", sector="Broad Market", industry="ETF", asset_type=AssetType.ETF, timezone="America/New_York"),
+    Instrument(instrument_id="XNYS:VNM", ticker="VNM", exchange_mic="XNYS", exchange_acronym="NYSE", company_name="VanEck Vietnam ETF", country="United States", currency="USD", sector="International Equity", industry="ETF", asset_type=AssetType.ETF, timezone="America/New_York"),
+    # --- Vietnam HOSE (VN30 + Blue Chips) ---
+    _vn_hose("FPT", "FPT Corporation", "Technology"),
+    _vn_hose("VNM", "Vietnam Dairy Products JSC (Vinamilk)", "Consumer Defensive"),
+    _vn_hose("HPG", "Hoa Phat Group JSC", "Basic Materials"),
+    _vn_hose("VCB", "Vietcombank (Joint Stock Commercial Bank for Foreign Trade)", "Financial Services"),
+    _vn_hose("VIC", "Vingroup JSC", "Real Estate"),
+    _vn_hose("VHM", "Vinhomes JSC", "Real Estate"),
+    _vn_hose("VRE", "Vincom Retail JSC", "Real Estate"),
+    _vn_hose("TCB", "Techcombank (Vietnam Technological & Commercial JSB)", "Financial Services"),
+    _vn_hose("MBB", "Military Commercial Joint Stock Bank (MBBank)", "Financial Services"),
+    _vn_hose("ACB", "Asia Commercial Joint Stock Bank", "Financial Services"),
+    _vn_hose("CTG", "VietinBank (Vietnam JS Commercial Bank for Industry & Trade)", "Financial Services"),
+    _vn_hose("BID", "BIDV (Bank for Investment and Development of Vietnam)", "Financial Services"),
+    _vn_hose("VPB", "VPBank (Vietnam Prosperity JS Commercial Bank)", "Financial Services"),
+    _vn_hose("STB", "Sacombank (Saigon Thuong Tin Commercial JSB)", "Financial Services"),
+    _vn_hose("HDB", "HDBank (Ho Chi Minh City Development JSB)", "Financial Services"),
+    _vn_hose("SSI", "SSI Securities Corporation", "Financial Services"),
+    _vn_hose("VND", "VNDIRECT Securities Corporation", "Financial Services"),
+    _vn_hose("HCM", "Ho Chi Minh City Securities Corporation (HSC)", "Financial Services"),
+    _vn_hose("MWG", "Mobile World Investment Corporation", "Consumer Cyclical"),
+    _vn_hose("MSN", "Masan Group Corporation", "Consumer Defensive"),
+    _vn_hose("GAS", "PetroVietnam Gas JSC (PV GAS)", "Energy"),
+    _vn_hose("SAB", "Sabeco (Saigon Beer - Alcohol - Beverage Corp)", "Consumer Defensive"),
+    _vn_hose("PLX", "Vietnam National Petroleum Group (Petrolimex)", "Energy"),
+    _vn_hose("POW", "PetroVietnam Power Corporation", "Utilities"),
+    _vn_hose("GVR", "Vietnam Rubber Group JSC", "Basic Materials"),
+    _vn_hose("BCM", "Becamex IDC Corporation", "Real Estate"),
+    _vn_hose("BVH", "Bao Viet Holdings", "Financial Services"),
+    _vn_hose("PNJ", "Phu Nhuan Jewelry JSC", "Consumer Cyclical"),
+    _vn_hose("REE", "Refrigeration Electrical Engineering Corp", "Industrials"),
+    _vn_hose("DGC", "Duc Giang Chemicals Group JSC", "Basic Materials"),
+    # --- Vietnam HNX (Scheduled transfer to HOSE 2026-12-28) ---
+    _vn_hnx("SHS", "Saigon - Hanoi Securities JSC", "Financial Services"),
+    _vn_hnx("PVS", "PetroVietnam Technical Services Corporation", "Energy"),
+    _vn_hnx("IDC", "IDICO Corporation - JSC", "Industrials"),
+    _vn_hnx("CEO", "C.E.O Group JSC", "Real Estate"),
+    _vn_hnx("MBS", "MB Securities JSC", "Financial Services"),
+    _vn_hnx("NTP", "Tien Phong Plastic JSC", "Basic Materials"),
+    _vn_hnx("VCS", "Vicostone JSC", "Basic Materials"),
+    # --- Europe ---
+    Instrument(instrument_id="XLON:HSBA", ticker="HSBA", exchange_mic="XLON", exchange_acronym="LSE", company_name="HSBC Holdings plc", country="United Kingdom", currency="GBP", sector="Financial Services", industry="Banks", asset_type=AssetType.EQUITY, timezone="Europe/London"),
+    Instrument(instrument_id="XETR:SAP", ticker="SAP", exchange_mic="XETR", exchange_acronym="Xetra", company_name="SAP SE", country="Germany", currency="EUR", sector="Technology", industry="Software", asset_type=AssetType.EQUITY, timezone="Europe/Berlin"),
     Instrument(instrument_id="XPAR:MC", ticker="MC", exchange_mic="XPAR", exchange_acronym="Euronext", company_name="LVMH Moet Hennessy Louis Vuitton SE", country="France", currency="EUR", sector="Consumer Cyclical", industry="Luxury Goods", asset_type=AssetType.EQUITY, timezone="Europe/Paris"),
     Instrument(instrument_id="XSWX:NESN", ticker="NESN", exchange_mic="XSWX", exchange_acronym="SIX", company_name="Nestle S.A.", country="Switzerland", currency="CHF", sector="Consumer Defensive", industry="Packaged Foods", asset_type=AssetType.EQUITY, timezone="Europe/Zurich"),
-    Instrument(instrument_id="XMIL:ENEL", ticker="ENEL", exchange_mic="XMIL", exchange_acronym="Borsa Italiana", company_name="Enel S.p.A.", country="Italy", currency="EUR", sector="Utilities", industry="Utilities - Diversified", asset_type=AssetType.EQUITY, timezone="Europe/Rome"),
-    # --- Phase 7: Asia, ASEAN & Oceania ---
+    Instrument(instrument_id="XMIL:ENEL", ticker="ENEL", exchange_mic="XMIL", exchange_acronym="Borsa Italiana", company_name="Enel S.p.A.", country="Italy", currency="EUR", sector="Utilities", industry="Utilities", asset_type=AssetType.EQUITY, timezone="Europe/Rome"),
+    # --- Asia, ASEAN & Oceania ---
     Instrument(instrument_id="XTKS:7203", ticker="7203", exchange_mic="XTKS", exchange_acronym="TSE", company_name="Toyota Motor Corporation", country="Japan", currency="JPY", sector="Consumer Cyclical", industry="Auto Manufacturers", asset_type=AssetType.EQUITY, timezone="Asia/Tokyo"),
-    Instrument(instrument_id="XHKG:0700", ticker="0700", exchange_mic="XHKG", exchange_acronym="HKEX", company_name="Tencent Holdings Limited", country="Hong Kong", currency="HKD", sector="Communication Services", industry="Internet Content & Information", asset_type=AssetType.EQUITY, timezone="Asia/Hong_Kong"),
+    Instrument(instrument_id="XHKG:0700", ticker="0700", exchange_mic="XHKG", exchange_acronym="HKEX", company_name="Tencent Holdings Limited", country="Hong Kong", currency="HKD", sector="Communication Services", industry="Internet Content", asset_type=AssetType.EQUITY, timezone="Asia/Hong_Kong"),
     Instrument(instrument_id="XKRX:005930", ticker="005930", exchange_mic="XKRX", exchange_acronym="KRX", company_name="Samsung Electronics Co., Ltd.", country="South Korea", currency="KRW", sector="Technology", industry="Semiconductors", asset_type=AssetType.EQUITY, timezone="Asia/Seoul"),
-    Instrument(instrument_id="XSES:D05", ticker="D05", exchange_mic="XSES", exchange_acronym="SGX", company_name="DBS Group Holdings Ltd", country="Singapore", currency="SGD", sector="Financial Services", industry="Banks - Regional", asset_type=AssetType.EQUITY, timezone="Asia/Singapore"),
-    Instrument(instrument_id="XIDX:BBCA", ticker="BBCA", exchange_mic="XIDX", exchange_acronym="IDX", company_name="PT Bank Central Asia Tbk", country="Indonesia", currency="IDR", sector="Financial Services", industry="Banks - Regional", asset_type=AssetType.EQUITY, timezone="Asia/Jakarta"),
-    Instrument(instrument_id="XBKK:PTT", ticker="PTT", exchange_mic="XBKK", exchange_acronym="SET", company_name="PTT Public Company Limited", country="Thailand", currency="THB", sector="Energy", industry="Oil & Gas Integrated", asset_type=AssetType.EQUITY, timezone="Asia/Bangkok"),
-    Instrument(instrument_id="XASX:BHP", ticker="BHP", exchange_mic="XASX", exchange_acronym="ASX", company_name="BHP Group Limited", country="Australia", currency="AUD", sector="Basic Materials", industry="Other Industrial Metals & Mining", asset_type=AssetType.EQUITY, timezone="Australia/Sydney"),
+    Instrument(instrument_id="XSES:D05", ticker="D05", exchange_mic="XSES", exchange_acronym="SGX", company_name="DBS Group Holdings Ltd", country="Singapore", currency="SGD", sector="Financial Services", industry="Banks", asset_type=AssetType.EQUITY, timezone="Asia/Singapore"),
+    Instrument(instrument_id="XIDX:BBCA", ticker="BBCA", exchange_mic="XIDX", exchange_acronym="IDX", company_name="PT Bank Central Asia Tbk", country="Indonesia", currency="IDR", sector="Financial Services", industry="Banks", asset_type=AssetType.EQUITY, timezone="Asia/Jakarta"),
+    Instrument(instrument_id="XBKK:PTT", ticker="PTT", exchange_mic="XBKK", exchange_acronym="SET", company_name="PTT Public Company Limited", country="Thailand", currency="THB", sector="Energy", industry="Oil & Gas", asset_type=AssetType.EQUITY, timezone="Asia/Bangkok"),
+    Instrument(instrument_id="XASX:BHP", ticker="BHP", exchange_mic="XASX", exchange_acronym="ASX", company_name="BHP Group Limited", country="Australia", currency="AUD", sector="Basic Materials", industry="Metals & Mining", asset_type=AssetType.EQUITY, timezone="Australia/Sydney"),
 ]
 
-# Backward-compatible alias
 PHASE1_INSTRUMENTS = GLOBAL_INSTRUMENTS
 
 HNX_TRANSFER_RULES: Dict[str, ExchangeTransferRule] = {

@@ -1,4 +1,4 @@
-"""Phase 3: Global Portfolio Management, Modern Portfolio Theory (MPT), CAPM & FX Attribution.
+"""Phase 3: Global Portfolio Management, MPT, CAPM, FX Attribution & Diverse-Risk Analyzer.
 
 Implements:
   - Portfolio expected return, variance, volatility, Sharpe ratio, and risk contributions.
@@ -6,14 +6,18 @@ Implements:
   - Efficient Frontier curve generation.
   - CAPM Beta, Market Risk Premium, and Expected Return.
   - Multi-currency FX return decomposition: (1 + r_local)(1 + r_fx) - 1.
+  - Diverse-Risk Analyzer (up to 10 assets): Diversification Ratio (Choueifaty-Coignard),
+    Risk Reduction %, pairwise correlation diagnostics, optimal risk-reducing subsets,
+    and marginal volatility reduction for candidate additions.
   - SQLite persistence for user portfolios.
 """
 
 from __future__ import annotations
 
+import itertools
 import math
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -107,8 +111,8 @@ class CAPMResponse(BaseModel):
 
 
 class FXAttributionRequest(BaseModel):
-    local_return: float = Field(..., description="Asset return in native currency, e.g. 0.10 for +10%")
-    fx_return: float = Field(..., description="FX appreciation of asset currency vs base currency, e.g. -0.03")
+    local_return: float
+    fx_return: float
 
 
 class FXAttributionResponse(BaseModel):
@@ -116,6 +120,66 @@ class FXAttributionResponse(BaseModel):
     fx_return: float
     interaction_term: float
     base_currency_return: float
+
+
+# --- Diverse-Risk Models ---
+
+class DiverseRiskRequest(BaseModel):
+    asset_price_maps: Dict[str, Dict[str, float]] = Field(
+        ..., description="2 to 10 selected stocks: instrument_id -> {ISO_date: close_price}"
+    )
+    candidate_price_maps: Dict[str, Dict[str, float]] = Field(
+        default_factory=dict,
+        description="Optional external candidate stocks to evaluate for marginal risk reduction",
+    )
+    periods_per_year: int = Field(default=252, ge=1, le=365)
+
+
+class CorrelationPair(BaseModel):
+    asset_a: str
+    asset_b: str
+    correlation: float
+
+
+class SuggestedCombination(BaseModel):
+    symbols: List[str]
+    portfolio_volatility: float
+    standalone_avg_volatility: float
+    diversification_ratio: float
+    risk_reduction_pct: float
+    avg_pairwise_correlation: float
+    optimal_weights: Dict[str, float]
+
+
+class CandidateAdditionResult(BaseModel):
+    symbol: str
+    standalone_volatility: float
+    avg_correlation_with_portfolio: float
+    new_portfolio_volatility: float
+    volatility_change_pct: float
+    is_risk_reducing: bool
+
+
+class DiverseRiskResponse(BaseModel):
+    symbols: List[str]
+    aligned_return_observations: int
+    computed_at_utc: datetime
+    is_risk_reducing: bool
+    verdict: str
+    verdict_summary: str
+    equal_weight_volatility: float
+    standalone_weighted_volatility: float
+    diversification_ratio: float
+    risk_reduction_pct: float
+    gmv_volatility: float
+    gmv_risk_reduction_pct: float
+    avg_pairwise_correlation: float
+    effective_num_bets: float
+    highest_correlation_pairs: List[CorrelationPair]
+    lowest_correlation_pairs: List[CorrelationPair]
+    suggested_combinations: List[SuggestedCombination]
+    candidate_additions: List[CandidateAdditionResult]
+    assumptions: List[str]
 
 
 def compute_portfolio_stats(
@@ -147,6 +211,20 @@ def _pack_point(symbols: List[str], w: np.ndarray, mu: np.ndarray, cov: np.ndarr
     )
 
 
+def _solve_gmv(cov: np.ndarray) -> np.ndarray:
+    n = cov.shape[0]
+    w0 = np.full(n, 1.0 / n, dtype=float)
+    bounds = tuple((0.0, 1.0) for _ in range(n))
+    res = minimize(
+        lambda w: float(w @ cov @ w),
+        w0,
+        method="SLSQP",
+        bounds=bounds,
+        constraints=[{"type": "eq", "fun": lambda w: np.sum(w) - 1.0}],
+    )
+    return res.x if res.success else w0
+
+
 def optimize_portfolio(req: PortfolioOptimizeRequest) -> PortfolioOptimizeResponse:
     if len(req.asset_price_maps) < 2:
         raise ValueError("Portfolio optimization requires at least 2 assets.")
@@ -163,43 +241,25 @@ def optimize_portfolio(req: PortfolioOptimizeRequest) -> PortfolioOptimizeRespon
 
     mu = rets.mean().to_numpy(dtype=float) * req.periods_per_year
     cov = rets.cov(ddof=1).to_numpy(dtype=float) * req.periods_per_year
-    # Small ridge regularization for numerical stability on near-singular matrices
     cov = cov + np.eye(n) * 1e-10
 
     bounds = tuple((req.min_weight, req.max_weight) for _ in range(n))
     sum_constraint = {"type": "eq", "fun": lambda w: np.sum(w) - 1.0}
     w0 = np.full(n, 1.0 / n, dtype=float)
 
-    # 1. Global Minimum Variance (GMV)
-    gmv_res = minimize(
-        lambda w: float(w @ cov @ w),
-        w0,
-        method="SLSQP",
-        bounds=bounds,
-        constraints=[sum_constraint],
-    )
+    gmv_res = minimize(lambda w: float(w @ cov @ w), w0, method="SLSQP", bounds=bounds, constraints=[sum_constraint])
     w_gmv = gmv_res.x if gmv_res.success else w0
 
-    # 2. Maximum Sharpe Ratio
     def neg_sharpe(w: np.ndarray) -> float:
-        r, v, s, _ = compute_portfolio_stats(w, mu, cov, req.risk_free_rate_annual)
+        _, v, s, _ = compute_portfolio_stats(w, mu, cov, req.risk_free_rate_annual)
         return -s if v > 1e-12 else 1e6
 
-    ms_res = minimize(
-        neg_sharpe,
-        w0,
-        method="SLSQP",
-        bounds=bounds,
-        constraints=[sum_constraint],
-    )
+    ms_res = minimize(neg_sharpe, w0, method="SLSQP", bounds=bounds, constraints=[sum_constraint])
     w_ms = ms_res.x if ms_res.success else w0
 
-    # 3. Efficient Frontier
     gmv_ret = float(w_gmv @ mu)
     max_feasible_ret = float(np.max(mu))
-    min_target = min(gmv_ret, max_feasible_ret)
-    max_target = max(gmv_ret, max_feasible_ret)
-    targets = np.linspace(min_target, max_target, req.frontier_points)
+    targets = np.linspace(min(gmv_ret, max_feasible_ret), max(gmv_ret, max_feasible_ret), req.frontier_points)
 
     frontier: List[PortfolioPoint] = []
     for target_r in targets:
@@ -208,10 +268,7 @@ def optimize_portfolio(req: PortfolioOptimizeRequest) -> PortfolioOptimizeRespon
             w_gmv,
             method="SLSQP",
             bounds=bounds,
-            constraints=[
-                sum_constraint,
-                {"type": "eq", "fun": lambda w, tr=target_r: float(w @ mu) - tr},
-            ],
+            constraints=[sum_constraint, {"type": "eq", "fun": lambda w, tr=target_r: float(w @ mu) - tr}],
         )
         if res.success:
             frontier.append(_pack_point(symbols, res.x, mu, cov, req.risk_free_rate_annual))
@@ -230,8 +287,179 @@ def optimize_portfolio(req: PortfolioOptimizeRequest) -> PortfolioOptimizeRespon
         assumptions=[
             f"Mean-Variance Optimization uses sample mean returns and sample covariance annualized by {req.periods_per_year}.",
             f"Constraints: sum(weights) = 1, bounds = [{req.min_weight:.2f}, {req.max_weight:.2f}], Rf = {req.risk_free_rate_annual:.2%}.",
-            f"Estimated turnover/rebalancing transaction cost assumption: {req.transaction_cost_bps:.1f} bps (disclosed separately from gross MPT return).",
-            "Historical sample inputs are subject to estimation error and do not guarantee future portfolio performance.",
+            f"Estimated turnover/rebalancing transaction cost assumption: {req.transaction_cost_bps:.1f} bps.",
+            "Historical sample inputs do not guarantee future portfolio performance.",
+        ],
+    )
+
+
+def analyze_diverse_risk(req: DiverseRiskRequest) -> DiverseRiskResponse:
+    """Evaluate whether a basket of 2–10 stocks achieves genuine diversification risk
+    reduction, and recommend optimal risk-reducing subsets and candidate additions.
+    """
+    n_assets = len(req.asset_price_maps)
+    if n_assets < 2 or n_assets > 10:
+        raise ValueError(f"Diverse-Risk analysis requires between 2 and 10 stocks (received {n_assets}).")
+
+    df = pd.DataFrame(req.asset_price_maps).sort_index().dropna(how="any")
+    rets = df.pct_change().dropna(how="any")
+    if len(rets) < 5:
+        raise ValueError("Need at least 6 overlapping trading dates across all selected stocks.")
+
+    symbols = list(rets.columns)
+    n = len(symbols)
+    cov = rets.cov(ddof=1).to_numpy(dtype=float) * req.periods_per_year
+    cov_reg = cov + np.eye(n) * 1e-10
+    corr = rets.corr(method="pearson").to_numpy(dtype=float)
+    vols = np.sqrt(np.maximum(np.diag(cov), 0.0))
+
+    w_eq = np.full(n, 1.0 / n, dtype=float)
+    port_vol = math.sqrt(max(float(w_eq @ cov @ w_eq), 0.0))
+    standalone_avg_vol = float(w_eq @ vols)
+
+    dr = (standalone_avg_vol / port_vol) if port_vol > 1e-12 else 1.0
+    risk_red_pct = max(0.0, (1.0 - (port_vol / standalone_avg_vol)) * 100.0) if standalone_avg_vol > 1e-12 else 0.0
+
+    # GMV achievable risk reduction within the same selected basket
+    w_gmv = _solve_gmv(cov_reg)
+    gmv_vol = math.sqrt(max(float(w_gmv @ cov @ w_gmv), 0.0))
+    gmv_standalone = float(w_gmv @ vols)
+    gmv_red_pct = max(0.0, (1.0 - (gmv_vol / gmv_standalone)) * 100.0) if gmv_standalone > 1e-12 else 0.0
+
+    # Effective Number of Independent Bets via Risk Contributions
+    if port_vol > 1e-12:
+        rc_pct = (w_eq * (cov @ w_eq)) / (port_vol ** 2)
+        enb = float(1.0 / np.sum(rc_pct ** 2)) if np.sum(rc_pct ** 2) > 1e-12 else 1.0
+    else:
+        enb = 1.0
+
+    pairs: List[CorrelationPair] = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            pairs.append(
+                CorrelationPair(
+                    asset_a=symbols[i],
+                    asset_b=symbols[j],
+                    correlation=round(float(corr[i, j]), 4),
+                )
+            )
+
+    avg_corr = float(np.mean([p.correlation for p in pairs])) if pairs else 1.0
+    sorted_pairs = sorted(pairs, key=lambda p: p.correlation)
+    lowest_pairs = sorted_pairs[: min(5, len(sorted_pairs))]
+    highest_pairs = list(reversed(sorted_pairs[-min(5, len(sorted_pairs)) :]))
+
+    # Verdict classification
+    if risk_red_pct >= 15.0 and avg_corr < 0.60:
+        is_rr = True
+        verdict = "STRONG_RISK_REDUCTION"
+        verdict_summary = (
+            f"YES — This {n}-stock basket achieves strong diversification, cutting volatility by "
+            f"{risk_red_pct:.1f}% vs. standalone average risk (Diversification Ratio = {dr:.2f}, avg correlation = {avg_corr:.2f})."
+        )
+    elif risk_red_pct >= 5.0 and dr > 1.05:
+        is_rr = True
+        verdict = "MODERATE_RISK_REDUCTION"
+        verdict_summary = (
+            f"YES (Moderate) — This {n}-stock basket reduces volatility by {risk_red_pct:.1f}% "
+            f"(DR = {dr:.2f}, avg correlation = {avg_corr:.2f}). Adding lower-correlation sectors or markets can lower risk further."
+        )
+    else:
+        is_rr = False
+        verdict = "WEAK_OR_CONCENTRATED"
+        verdict_summary = (
+            f"LIMITED — High correlation (avg = {avg_corr:.2f}) leaves only {risk_red_pct:.1f}% risk reduction "
+            f"(DR = {dr:.2f}). Consider replacing redundant highly correlated stocks with uncorrelated markets or defensive sectors."
+        )
+
+    # Optimal Risk-Reducing Subsets (evaluate combinations of size k in {2, 3, 4} up to n)
+    suggestions: List[SuggestedCombination] = []
+    candidate_sizes = [k for k in (3, 4, 2) if k <= n]
+    for k in candidate_sizes:
+        for combo_idx in itertools.combinations(range(n), k):
+            idx_arr = list(combo_idx)
+            sub_cov = cov_reg[np.ix_(idx_arr, idx_arr)]
+            sub_vols = vols[idx_arr]
+            sub_w = _solve_gmv(sub_cov)
+            sub_pvol = math.sqrt(max(float(sub_w @ cov[np.ix_(idx_arr, idx_arr)] @ sub_w), 0.0))
+            sub_savol = float(sub_w @ sub_vols)
+            sub_dr = (sub_savol / sub_pvol) if sub_pvol > 1e-12 else 1.0
+            sub_red = max(0.0, (1.0 - sub_pvol / sub_savol) * 100.0) if sub_savol > 1e-12 else 0.0
+            sub_corrs = [corr[idx_arr[a], idx_arr[b]] for a in range(k) for b in range(a + 1, k)]
+            suggestions.append(
+                SuggestedCombination(
+                    symbols=[symbols[i] for i in idx_arr],
+                    portfolio_volatility=round(sub_pvol, 6),
+                    standalone_avg_volatility=round(sub_savol, 6),
+                    diversification_ratio=round(sub_dr, 4),
+                    risk_reduction_pct=round(sub_red, 2),
+                    avg_pairwise_correlation=round(float(np.mean(sub_corrs)), 4),
+                    optimal_weights={symbols[i]: round(float(w), 4) for i, w in zip(idx_arr, sub_w)},
+                )
+            )
+    # Rank by lowest portfolio volatility, breaking ties by highest risk_reduction_pct
+    suggestions.sort(key=lambda s: (s.portfolio_volatility, -s.risk_reduction_pct))
+    top_suggestions = suggestions[:5]
+
+    # Candidate Additions: measure marginal volatility impact of adding each external candidate
+    candidate_results: List[CandidateAdditionResult] = []
+    port_daily_rets = rets.mean(axis=1)
+    for cand_sym, cand_map in req.candidate_price_maps.items():
+        if cand_sym in symbols:
+            continue
+        cand_series = pd.Series(cand_map, dtype=float).sort_index()
+        joined = pd.concat([rets, cand_series.pct_change().rename(cand_sym)], axis=1).dropna(how="any")
+        if len(joined) < 6:
+            continue
+        cand_ret = joined[cand_sym]
+        sub_rets = joined[symbols]
+        cand_vol = float(cand_ret.std(ddof=1)) * math.sqrt(req.periods_per_year)
+        corrs_with_basket = [float(cand_ret.corr(sub_rets[s])) for s in symbols]
+        avg_c = float(np.mean(corrs_with_basket))
+
+        # New equal-weight portfolio with candidate added (weight 1/(n+1) each)
+        new_cov = joined.cov(ddof=1).to_numpy(dtype=float) * req.periods_per_year
+        w_new = np.full(n + 1, 1.0 / (n + 1), dtype=float)
+        new_vol = math.sqrt(max(float(w_new @ new_cov @ w_new), 0.0))
+        base_sub_cov = sub_rets.cov(ddof=1).to_numpy(dtype=float) * req.periods_per_year
+        base_sub_vol = math.sqrt(max(float(w_eq @ base_sub_cov @ w_eq), 0.0))
+        vol_change_pct = ((new_vol - base_sub_vol) / base_sub_vol) * 100.0 if base_sub_vol > 1e-12 else 0.0
+
+        candidate_results.append(
+            CandidateAdditionResult(
+                symbol=cand_sym,
+                standalone_volatility=round(cand_vol, 6),
+                avg_correlation_with_portfolio=round(avg_c, 4),
+                new_portfolio_volatility=round(new_vol, 6),
+                volatility_change_pct=round(vol_change_pct, 2),
+                is_risk_reducing=new_vol < base_sub_vol,
+            )
+        )
+    candidate_results.sort(key=lambda c: c.volatility_change_pct)
+
+    return DiverseRiskResponse(
+        symbols=symbols,
+        aligned_return_observations=int(len(rets)),
+        computed_at_utc=datetime.now(timezone.utc),
+        is_risk_reducing=is_rr,
+        verdict=verdict,
+        verdict_summary=verdict_summary,
+        equal_weight_volatility=round(port_vol, 6),
+        standalone_weighted_volatility=round(standalone_avg_vol, 6),
+        diversification_ratio=round(dr, 4),
+        risk_reduction_pct=round(risk_red_pct, 2),
+        gmv_volatility=round(gmv_vol, 6),
+        gmv_risk_reduction_pct=round(gmv_red_pct, 2),
+        avg_pairwise_correlation=round(avg_corr, 4),
+        effective_num_bets=round(enb, 2),
+        highest_correlation_pairs=highest_pairs,
+        lowest_correlation_pairs=lowest_pairs,
+        suggested_combinations=top_suggestions,
+        candidate_additions=candidate_results[:6],
+        assumptions=[
+            "Diversification Ratio (DR) = (Weighted Avg Standalone Volatility) / (Portfolio Volatility); DR > 1 indicates genuine risk reduction.",
+            "Suggested combinations evaluate minimum-variance allocations across aligned historical daily returns.",
+            "Historical correlations can rise during systemic market crises; quantitative suggestions are analytical tools, not investment advice.",
         ],
     )
 
@@ -330,11 +558,7 @@ class PortfolioStore:
             "base_currency": row["base_currency"],
             "created_at": row["created_at"],
             "holdings": holdings,
-            "exposures": {
-                "currency": ccy_exp,
-                "country": country_exp,
-                "sector": sector_exp,
-            },
+            "exposures": {"currency": ccy_exp, "country": country_exp, "sector": sector_exp},
         }
 
     def list_portfolios(self) -> List[Dict[str, object]]:

@@ -1,4 +1,4 @@
-"""FastAPI REST and WebSocket endpoints for QuantAI v1.0.0 (Phases 1–7)."""
+"""FastAPI REST and WebSocket endpoints for QuantAI v1.3.0."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from datetime import date, datetime, timezone
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, Field
 
 from app.analytics.engine import (
     MatrixAnalyticsRequest,
@@ -41,18 +42,20 @@ from app.fx.frankfurter import TARGET_CURRENCIES
 from app.portfolio.optimizer import (
     CAPMRequest,
     CAPMResponse,
+    DiverseRiskRequest,
+    DiverseRiskResponse,
     FXAttributionRequest,
     FXAttributionResponse,
     PortfolioCreateRequest,
     PortfolioOptimizeRequest,
     PortfolioOptimizeResponse,
     PortfolioStore,
+    analyze_diverse_risk,
     compute_capm,
     fx_return_attribution,
     optimize_portfolio,
 )
 from app.risk.engine import RiskAnalysisRequest, RiskAnalysisResponse, run_risk_analysis
-from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api/v1", tags=["quantai"])
 
@@ -140,6 +143,7 @@ def get_ohlcv(
     interval: str = Query(default="1d"),
     start_date: Optional[date] = Query(default=None),
     end_date: Optional[date] = Query(default=None),
+    period: Optional[str] = Query(default=None),
     allow_educational_fallback: bool = Query(default=True),
     registry: MarketDataRegistry = Depends(get_registry),
 ) -> OHLCVResponse:
@@ -152,6 +156,7 @@ def get_ohlcv(
         interval=interval,
         start_date=start_date,
         end_date=end_date,
+        period=period,
         allow_educational_fallback=allow_educational_fallback,
     )
 
@@ -183,8 +188,6 @@ def convert_fx(
     return registry.frankfurter.convert(base=base, quote=quote, amount=amount, as_of=as_of)
 
 
-# --- Phase 2: Quantitative Analysis ---
-
 @router.post("/analytics/single-asset", response_model=SingleAssetAnalyticsResponse)
 def analyze_single_asset(payload: SingleAssetAnalyticsRequest) -> SingleAssetAnalyticsResponse:
     return run_single_asset_analytics(payload)
@@ -195,11 +198,15 @@ def analyze_multi_asset_matrix(payload: MatrixAnalyticsRequest) -> MatrixAnalyti
     return run_matrix_analytics(payload)
 
 
-# --- Phase 3: Portfolio Optimization, CAPM, FX Attribution & CRUD ---
-
 @router.post("/portfolio/optimize", response_model=PortfolioOptimizeResponse)
 def optimize_portfolio_endpoint(payload: PortfolioOptimizeRequest) -> PortfolioOptimizeResponse:
     return optimize_portfolio(payload)
+
+
+@router.post("/portfolio/diverse-risk", response_model=DiverseRiskResponse)
+def diverse_risk_endpoint(payload: DiverseRiskRequest) -> DiverseRiskResponse:
+    """Evaluate diversification risk reduction for up to 10 stocks and suggest risk-reducing combinations."""
+    return analyze_diverse_risk(payload)
 
 
 @router.post("/portfolio/capm", response_model=CAPMResponse)
@@ -227,21 +234,15 @@ def list_portfolios_endpoint(
     return store.list_portfolios()
 
 
-# --- Phase 4: Financial Risk Management ---
-
 @router.post("/risk/analyze", response_model=RiskAnalysisResponse)
 def risk_analysis_endpoint(payload: RiskAnalysisRequest) -> RiskAnalysisResponse:
     return run_risk_analysis(payload)
 
 
-# --- Phase 5: Machine Learning & Forecasting ---
-
 @router.post("/forecasting/run", response_model=ForecastResponse)
 def forecasting_endpoint(payload: ForecastRequest) -> ForecastResponse:
     return run_forecasting_suite(payload)
 
-
-# --- Phase 6: Quantitative Signals & Backtesting ---
 
 @router.post("/signals/evaluate", response_model=SignalsResponse)
 def signals_endpoint(payload: SignalsRequest) -> SignalsResponse:

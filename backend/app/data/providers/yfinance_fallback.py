@@ -1,16 +1,15 @@
-"""Yahoo Finance (yfinance) educational historical fallback adapter.
+"""Yahoo Finance (yfinance) educational historical & intraday fallback adapter.
 
-STRICT POLICY:
-  - Educational and historical research fallback ONLY.
-  - NEVER labeled LIVE (maximum status is HISTORICAL for daily OHLCV or DELAYED for quotes).
-  - NEVER silently substituted when a caller requests LIVE real-time data.
-  - Unofficial endpoints: not licensed for commercial redistribution.
+Supports:
+  - Full IPO-to-present history via period='max' (for 1d, 1wk, 1mo).
+  - Intraday intervals: 1m (up to 7d), 5m/15m (up to 60d), 1h (up to 730d).
+  - Never labeled LIVE (strictly HISTORICAL or DELAYED).
 """
 
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from app.core.calendar import get_market_session
 from app.core.models import DataStatus, OHLCVBar, OHLCVResponse, QuoteResponse
@@ -23,12 +22,30 @@ EDUCATIONAL_WARNING = (
     "Not verified real-time and not licensed for commercial redistribution."
 )
 
+CURRENCY_BY_MIC: Dict[str, str] = {
+    "XNYS": "USD", "XNAS": "USD",
+    "XSTC": "VND", "XHAI": "VND",
+    "XLON": "GBP", "XETR": "EUR", "XPAR": "EUR", "XSWX": "CHF", "XMIL": "EUR",
+    "XTKS": "JPY", "XHKG": "HKD", "XKRX": "KRW",
+    "XSES": "SGD", "XKLS": "MYR", "XIDX": "IDR", "XBKK": "THB", "XASX": "AUD",
+}
+
+INTRADAY_MAX_PERIOD: Dict[str, str] = {
+    "1m": "7d",
+    "2m": "60d",
+    "5m": "60d",
+    "15m": "60d",
+    "30m": "60d",
+    "60m": "730d",
+    "1h": "730d",
+}
+
 
 class YFinanceFallbackProvider(BaseMarketDataProvider):
     capabilities = ProviderCapabilities(
         provider_id="yfinance_fallback",
         display_name="Yahoo Finance (Educational Historical Fallback)",
-        supported_mics=("XNYS", "XNAS", "XSTC", "XHAI"),
+        supported_mics=tuple(CURRENCY_BY_MIC.keys()),
         supports_live_quotes=False,
         supports_websocket=False,
         supports_historical_ohlcv=True,
@@ -54,7 +71,7 @@ class YFinanceFallbackProvider(BaseMarketDataProvider):
     def get_quote(self, ticker: str, exchange_mic: str) -> QuoteResponse:
         now_utc = datetime.now(timezone.utc)
         instrument_id = f"{exchange_mic}:{ticker}"
-        currency = "VND" if exchange_mic in {"XSTC", "XHAI"} else "USD"
+        currency = CURRENCY_BY_MIC.get(exchange_mic.upper(), "USD")
         session_info = get_market_session(exchange_mic, now_utc=now_utc)
 
         if not self.is_configured():
@@ -74,7 +91,7 @@ class YFinanceFallbackProvider(BaseMarketDataProvider):
             ticker=ticker,
             exchange_mic=exchange_mic,
             interval="1d",
-            start_date=now_utc.date() - timedelta(days=10),
+            start_date=now_utc.date() - timedelta(days=14),
             end_date=now_utc.date(),
         )
         if not ohlcv.bars:
@@ -134,10 +151,11 @@ class YFinanceFallbackProvider(BaseMarketDataProvider):
         interval: str = "1d",
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        period: Optional[str] = None,
     ) -> OHLCVResponse:
         now_utc = datetime.now(timezone.utc)
         instrument_id = f"{exchange_mic}:{ticker}"
-        currency = "VND" if exchange_mic in {"XSTC", "XHAI"} else "USD"
+        currency = CURRENCY_BY_MIC.get(exchange_mic.upper(), "USD")
         yf = self._import_yf()
 
         if not self._enabled or yf is None:
@@ -153,17 +171,30 @@ class YFinanceFallbackProvider(BaseMarketDataProvider):
                 unavailable_reason="yfinance educational fallback is disabled or not installed.",
             )
 
-        end_d = end_date or now_utc.date()
-        start_d = start_date or (end_d - timedelta(days=180))
         yf_sym = to_yfinance_symbol(ticker, exchange_mic)
+        clean_interval = interval.strip().lower()
 
         try:
-            df = yf.Ticker(yf_sym).history(
-                start=start_d.isoformat(),
-                end=(end_d + timedelta(days=1)).isoformat(),
-                interval=interval,
-                auto_adjust=False,
-            )
+            tk = yf.Ticker(yf_sym)
+            # Intraday intervals have strict Yahoo Finance lookback caps (1m=7d, 5m/15m=60d, 1h=730d)
+            if clean_interval in INTRADAY_MAX_PERIOD:
+                use_period = period if (period and period != "max") else INTRADAY_MAX_PERIOD[clean_interval]
+                df = tk.history(period=use_period, interval=clean_interval, auto_adjust=False)
+            elif period == "max" or (start_date is None and period is None):
+                # Default to FULL IPO-to-present history!
+                df = tk.history(period="max", interval=clean_interval, auto_adjust=False)
+            elif period:
+                df = tk.history(period=period, interval=clean_interval, auto_adjust=False)
+            else:
+                end_d = end_date or now_utc.date()
+                start_d = start_date or (end_d - timedelta(days=730))
+                df = tk.history(
+                    start=start_d.isoformat(),
+                    end=(end_d + timedelta(days=1)).isoformat(),
+                    interval=clean_interval,
+                    auto_adjust=False,
+                )
+
             raw_bars: List[OHLCVBar] = []
             for idx, row in df.iterrows():
                 ts = idx.to_pydatetime()
@@ -179,7 +210,7 @@ class YFinanceFallbackProvider(BaseMarketDataProvider):
                         low=float(row["Low"]),
                         close=float(row["Close"]),
                         adjusted_close=float(row.get("Adj Close", row["Close"])),
-                        volume=int(row["Volume"]),
+                        volume=int(row["Volume"]) if row["Volume"] == row["Volume"] else 0,
                     )
                 )
             bars, warnings = validate_ohlcv_bars(raw_bars)
@@ -190,19 +221,19 @@ class YFinanceFallbackProvider(BaseMarketDataProvider):
                     ticker=ticker,
                     exchange_mic=exchange_mic,
                     currency=currency,
-                    interval=interval,
+                    interval=clean_interval,
                     provider=self.capabilities.provider_id,
                     data_status=DataStatus.DATA_UNAVAILABLE,
                     retrieval_timestamp=now_utc,
                     warnings=warnings,
-                    unavailable_reason=f"yfinance returned no valid bars for {yf_sym}.",
+                    unavailable_reason=f"yfinance returned no valid bars for {yf_sym} (interval={clean_interval}).",
                 )
             return OHLCVResponse(
                 instrument_id=instrument_id,
                 ticker=ticker,
                 exchange_mic=exchange_mic,
                 currency=currency,
-                interval=interval,
+                interval=clean_interval,
                 provider=self.capabilities.provider_id,
                 data_status=DataStatus.HISTORICAL,
                 market_timestamp=bars[-1].timestamp,
@@ -216,7 +247,7 @@ class YFinanceFallbackProvider(BaseMarketDataProvider):
                 ticker=ticker,
                 exchange_mic=exchange_mic,
                 currency=currency,
-                interval=interval,
+                interval=clean_interval,
                 provider=self.capabilities.provider_id,
                 data_status=DataStatus.DATA_UNAVAILABLE,
                 retrieval_timestamp=now_utc,
