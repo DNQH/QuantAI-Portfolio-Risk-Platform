@@ -1,13 +1,11 @@
 /**
- * English-only UI string catalog (Phase 1).
- * Structured as a typed dictionary so additional locales (e.g. vi.ts)
- * can be added later without modifying component logic.
+ * English-only UI string catalog (v1.5.0).
  */
 export const en = {
   brand: {
     name: 'QuantAI',
     subtitle: 'Global Quantitative Investment Research & Financial Risk Platform',
-    phaseBadge: 'Phase 1 · Core Foundation',
+    phaseBadge: 'v1.5.0 · Full Suite',
   },
   nav: {
     overview: 'Overview Dashboard',
@@ -15,7 +13,7 @@ export const en = {
     quantAnalysis: 'Quantitative Analysis',
     portfolio: 'Portfolio Manager',
     risk: 'Risk Analytics',
-    fx: 'FX Analytics',
+    fx: 'FX Converter',
     ml: 'Machine Learning',
     signals: 'Quantitative Signals',
     backtesting: 'Backtesting',
@@ -36,7 +34,7 @@ export const en = {
     marketSession: 'Market Session',
     noDataWarning: 'No verified market data available. QuantAI never substitutes synthetic prices.',
     plannedNotice: 'Scheduled for upcoming phase — no simulated placeholders displayed.',
-    searchPlaceholder: 'Search by ticker, company, exchange MIC, country, or sector (e.g. AAPL, FPT, VNM)...',
+    searchPlaceholder: 'Search or type MIC:TICKER + Enter (e.g. XSTC:TCB)...',
   },
 } as const;
 

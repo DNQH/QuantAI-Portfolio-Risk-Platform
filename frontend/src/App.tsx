@@ -101,6 +101,9 @@ export const App: React.FC = () => {
 
   const [coverage, setCoverage] = useState<ExchangeCoverageEntry[]>([]);
   const [fxBase, setFxBase] = useState<string>('USD');
+  const [fxQuote, setFxQuote] = useState<string>('VND');
+  const [fxAmount, setFxAmount] = useState<string>('1000');
+  const [fxConverted, setFxConverted] = useState<{ converted_amount: number | null; rate: number | null; reference_date: string | null } | null>(null);
   const [fxRates, setFxRates] = useState<FXRatesResponse | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -175,6 +178,12 @@ export const App: React.FC = () => {
     quantApi.getFxRates(fxBase).then(setFxRates).catch(() => setFxRates(null));
   }, [fxBase]);
 
+  useEffect(() => {
+    const amt = parseFloat(fxAmount);
+    if (!Number.isFinite(amt) || amt <= 0) return;
+    quantApi.convertFx(fxBase, fxQuote, amt).then(setFxConverted).catch(() => setFxConverted(null));
+  }, [fxBase, fxQuote, fxAmount]);
+
   const runPortfolioOptimization = async () => {
     setPortfolioLoading(true);
     setErrorMsg(null);
@@ -248,7 +257,7 @@ export const App: React.FC = () => {
         <div className="mb-6 border-b border-terminal-border pb-4 flex items-center justify-between">
           <div>
             <div className="text-lg font-bold tracking-tight">{en.brand.name}</div>
-            <div className="mt-1 font-mono text-[11px] text-emerald-400">v1.3.0 · Full Suite</div>
+            <div className="mt-1 font-mono text-[11px] text-emerald-400">v1.6.1 · Full Suite</div>
           </div>
           <button onClick={() => setDarkMode((d) => !d)} className="rounded border border-slate-600/40 px-2 py-1 font-mono text-[10px]">
             {darkMode ? 'Light' : 'Dark'}
@@ -379,7 +388,7 @@ export const App: React.FC = () => {
                 <div className="mb-3 flex items-center justify-between">
                   <h2 className="text-sm font-semibold">2-Year Cumulative Return &amp; Drawdown Profile</h2>
                   <button onClick={() => setActiveTab('marketData')} className="text-xs text-blue-400 hover:underline">
-                    Open Full IPO Candlestick Explorer →
+                    Candle Chart →
                   </button>
                 </div>
                 <div className="h-72 w-full">
@@ -875,19 +884,48 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'fx' && (
-          <div className="space-y-4">
-            <div className={`flex items-center justify-between rounded-lg border p-4 ${panelBg}`}>
-              <div>
-                <h2 className="text-sm font-semibold">Global FX Reference Rates (15 Target Currencies)</h2>
-                <p className="text-xs opacity-70">Frankfurter v2 official central-bank DAILY_REFERENCE midpoints.</p>
-              </div>
-              <div className="flex items-center gap-3">
-                <select value={fxBase} onChange={(e) => setFxBase(e.target.value)} className={`rounded border px-2.5 py-1 font-mono text-xs ${panelBg}`}>
-                  {['USD', 'EUR', 'GBP', 'JPY', 'VND', 'SGD', 'AUD', 'CHF'].map((c) => (
-                    <option key={c} value={c}>Base: {c}</option>
-                  ))}
-                </select>
+          <div className="space-y-6">
+            <div className={`rounded-lg border p-5 space-y-4 ${panelBg}`}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-base font-semibold">FX Currency Converter</h2>
+                  <p className="text-xs opacity-70">Official central-bank daily reference rates across 15 global currencies (Frankfurter v2).</p>
+                </div>
                 {fxRates && <StatusBadge status={fxRates.data_status} />}
+              </div>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-4 items-end">
+                <div>
+                  <label className="block text-[11px] opacity-70 mb-1">Amount</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={fxAmount}
+                    onChange={(e) => setFxAmount(e.target.value)}
+                    className={`w-full rounded border px-3 py-2 font-mono text-sm ${panelBg}`}
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] opacity-70 mb-1">From Currency</label>
+                  <select value={fxBase} onChange={(e) => setFxBase(e.target.value)} className={`w-full rounded border px-3 py-2 font-mono text-sm ${panelBg}`}>
+                    {['USD', 'EUR', 'GBP', 'CHF', 'JPY', 'HKD', 'CNY', 'KRW', 'SGD', 'AUD', 'CAD', 'VND', 'MYR', 'IDR', 'THB'].map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] opacity-70 mb-1">To Currency</label>
+                  <select value={fxQuote} onChange={(e) => setFxQuote(e.target.value)} className={`w-full rounded border px-3 py-2 font-mono text-sm ${panelBg}`}>
+                    {['VND', 'USD', 'EUR', 'GBP', 'CHF', 'JPY', 'HKD', 'CNY', 'KRW', 'SGD', 'AUD', 'CAD', 'MYR', 'IDR', 'THB'].map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="rounded border border-emerald-500/40 bg-emerald-500/10 px-3 py-2">
+                  <div className="text-[10px] opacity-75">Converted Value ({fxConverted?.reference_date ?? 'Latest'})</div>
+                  <div className="font-mono text-base font-bold text-emerald-300">
+                    {fxConverted?.converted_amount != null ? `${fxConverted.converted_amount.toLocaleString()} ${fxQuote}` : 'N/A'}
+                  </div>
+                </div>
               </div>
             </div>
             <div className={`overflow-x-auto rounded-lg border ${panelBg}`}>

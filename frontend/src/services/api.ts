@@ -180,6 +180,40 @@ export interface DiverseRiskResponse {
   assumptions: string[];
 }
 
+
+export interface DiverseRiskAdvisorResponse {
+  answer: string;
+  engine_used: string;
+  used_llm: boolean;
+  sector_breakdown: Record<string, number>;
+  country_breakdown: Record<string, number>;
+  missing_defensive_sectors: string[];
+  recommended_actions: string[];
+  disclaimer: string;
+}
+
+
+export interface MarketBlueprintResponse {
+  market_scope: 'US' | 'VN' | 'US_VN' | 'GLOBAL';
+  market_label: string;
+  recommended_blueprints: Array<{
+    name: string;
+    sectors: string[];
+    rationale: string;
+    suggested_tickers: string[];
+  }>;
+  sectors: Array<{
+    sector: string;
+    stocks: Array<{
+      instrument_id: string;
+      ticker: string;
+      company_name: string;
+      country: string;
+      currency: string;
+    }>;
+  }>;
+}
+
 const API_BASE = '/api/v1';
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -230,6 +264,26 @@ export const quantApi = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ instrument_id: instrumentId, bars, risk_free_rate_annual: riskFreeRateAnnual }),
+    }),
+
+  getMarketBlueprint: (marketScope: 'US' | 'VN' | 'US_VN' | 'GLOBAL') =>
+    fetchJson<MarketBlueprintResponse>(`/portfolio/diverse-risk/blueprint?market_scope=${marketScope}`),
+
+  askDiverseRiskAdvisor: (
+    question: string,
+    analysis: DiverseRiskResponse,
+    marketScope?: string,
+    selectedSectors: string[] = []
+  ) =>
+    fetchJson<DiverseRiskAdvisorResponse>('/portfolio/diverse-risk/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        question,
+        analysis,
+        market_scope: marketScope,
+        selected_sectors: selectedSectors,
+      }),
     }),
 
   analyzeDiverseRisk: (
@@ -293,6 +347,18 @@ export const quantApi = {
     }),
 
   getExchangeCoverage: () => fetchJson<ExchangeCoverageEntry[]>('/exchanges/coverage'),
+
+  convertFx: (base: string, quote: string, amount: number) =>
+    fetchJson<{
+      base: string;
+      quote: string;
+      amount: number;
+      converted_amount: number | null;
+      rate: number | null;
+      reference_date: string | null;
+      provider: string;
+      data_status: string;
+    }>(`/fx/convert?base=${encodeURIComponent(base)}&quote=${encodeURIComponent(quote)}&amount=${amount}`),
 
   getFxRates: (base = 'USD') =>
     fetchJson<FXRatesResponse>(`/fx/rates?base=${encodeURIComponent(base)}`),

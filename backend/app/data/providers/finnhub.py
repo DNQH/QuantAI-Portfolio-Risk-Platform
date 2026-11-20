@@ -10,6 +10,7 @@ Official documentation verified (finnhub.io/docs/api):
 
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timezone
 from typing import Any, Callable, List, Optional
 
@@ -26,6 +27,7 @@ from app.core.models import (
 from app.data.base import BaseMarketDataProvider, ProviderCapabilities, SlidingWindowRateLimiter
 from app.data.freshness import classify_quote_freshness
 
+logger = logging.getLogger("quantai.finnhub")
 FINNHUB_REST_BASE = "https://finnhub.io/api/v1"
 FINNHUB_WS_URL = "wss://ws.finnhub.io"
 
@@ -154,6 +156,7 @@ class FinnhubProvider(BaseMarketDataProvider):
             retrieval_timestamp=now_utc,
             market_session=session_info.session,
             provider_entitled_live=True,
+            max_live_age_seconds=300,
         )
 
         return QuoteResponse(

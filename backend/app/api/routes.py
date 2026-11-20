@@ -39,6 +39,14 @@ from app.core.symbology import parse_instrument_id, resolve_effective_exchange
 from app.data.registry import MarketDataRegistry
 from app.forecasting.models import ForecastRequest, ForecastResponse, run_forecasting_suite
 from app.fx.frankfurter import TARGET_CURRENCIES
+from app.portfolio.advisor import (
+    DiverseRiskAdvisorRequest,
+    DiverseRiskAdvisorResponse,
+    MarketBlueprintResponse,
+    MarketScope,
+    ask_diverse_risk_advisor,
+    get_market_sector_blueprints,
+)
 from app.portfolio.optimizer import (
     CAPMRequest,
     CAPMResponse,
@@ -203,10 +211,33 @@ def optimize_portfolio_endpoint(payload: PortfolioOptimizeRequest) -> PortfolioO
     return optimize_portfolio(payload)
 
 
+
+@router.get("/portfolio/diverse-risk/blueprint", response_model=MarketBlueprintResponse)
+def diverse_risk_blueprint_endpoint(
+    market_scope: MarketScope = Query(default="VN", description="US, VN, US_VN, or GLOBAL"),
+) -> MarketBlueprintResponse:
+    return get_market_sector_blueprints(market_scope)
+
+
 @router.post("/portfolio/diverse-risk", response_model=DiverseRiskResponse)
 def diverse_risk_endpoint(payload: DiverseRiskRequest) -> DiverseRiskResponse:
     """Evaluate diversification risk reduction for up to 10 stocks and suggest risk-reducing combinations."""
     return analyze_diverse_risk(payload)
+
+
+
+@router.post("/portfolio/diverse-risk/ask", response_model=DiverseRiskAdvisorResponse)
+def diverse_risk_advisor_endpoint(
+    payload: DiverseRiskAdvisorRequest,
+    request: Request,
+) -> DiverseRiskAdvisorResponse:
+    cfg = request.app.state.settings
+    return ask_diverse_risk_advisor(
+        payload,
+        gemini_api_key=cfg.gemini_api_key,
+        gemini_model=cfg.gemini_model,
+        timeout=cfg.http_timeout_seconds,
+    )
 
 
 @router.post("/portfolio/capm", response_model=CAPMResponse)
