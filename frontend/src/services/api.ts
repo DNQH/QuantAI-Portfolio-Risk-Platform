@@ -225,6 +225,244 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+
+export interface PredictionMarketContract {
+  platform: string;
+  title: string;
+  yes_probability: number;
+  no_probability: number;
+  volume_usd: number;
+  end_date: string | null;
+  url: string;
+  relevance: 'direct_company' | 'macro_sector';
+  sentiment_tilt: number;
+}
+
+export interface SocialSignalPost {
+  platform: string;
+  source_channel: string;
+  title: string;
+  published_at: string;
+  url: string;
+  engagement: number;
+  polarity_score: number;
+  label: 'POSITIVE' | 'NEUTRAL' | 'NEGATIVE';
+}
+
+export interface CrowdSentimentResponse {
+  instrument_id: string;
+  ticker: string;
+  company_name: string;
+  horizon: '1W' | '1M' | '3M';
+  evaluated_at_utc: string;
+  verdict: 'POSITIVE' | 'NEUTRAL' | 'NEGATIVE';
+  crowd_score: number;
+  predicted_positive_probability: number;
+  model_name: string;
+  model_summary: string;
+  component_scores: {
+    polymarket_tilt_pct: number;
+    social_news_polarity_pct: number;
+    price_momentum_confirmation_pct: number;
+  };
+  live_sources_connected: string[];
+  polymarket_contracts: PredictionMarketContract[];
+  social_posts: SocialSignalPost[];
+  methodology_notes: string[];
+}
+
+export interface BankruptcyPipelineResponse {
+  instrument_id: string;
+  ticker: string;
+  company_name: string;
+  currency: string;
+  data_source: string;
+  computed_at_utc: string;
+  financials: {
+    total_assets: number;
+    current_assets: number;
+    current_liabilities: number;
+    total_liabilities: number;
+    total_debt: number;
+    retained_earnings: number;
+    ebit: number;
+    ebitda: number;
+    net_income: number;
+    revenue: number;
+    interest_expense: number;
+    operating_cash_flow: number;
+    market_cap: number;
+  };
+  variables: Array<{
+    category: 'Liquidity' | 'Leverage' | 'Profitability' | 'Cash Flow';
+    name: string;
+    value: number;
+    formatted: string;
+    interpretation: string;
+  }>;
+  models: Array<{
+    model_name: string;
+    raw_score: number;
+    raw_score_formatted: string;
+    implied_pd_12m: number;
+    zone: 'SAFE' | 'WATCH' | 'DISTRESS';
+    formula_summary: string;
+    plain_english: string;
+  }>;
+  ensemble_pd_12m: number;
+  ensemble_pd_pct: number;
+  risk_grade: string;
+  risk_zone: 'SAFE' | 'WATCH' | 'DISTRESS';
+  executive_summary: string;
+  notes: string[];
+}
+
+export interface PortfolioBacktestResponse {
+  instrument_ids: string[];
+  allocation_method: string;
+  rebalance_frequency: string;
+  executed_at_utc: string;
+  start_date: string;
+  end_date: string;
+  years_covered: number;
+  observations: number;
+  initial_capital: number;
+  final_portfolio_value: number;
+  total_return: number;
+  cagr: number;
+  annualized_volatility: number;
+  sharpe_ratio: number | null;
+  max_drawdown: number;
+  rebalance_count: number;
+  total_transaction_costs: number;
+  benchmark_final_value: number;
+  benchmark_total_return: number;
+  benchmark_cagr: number;
+  target_weights: Record<string, number>;
+  timestamps: string[];
+  equity_curve: number[];
+  benchmark_curve: number[];
+  calendar_year_returns: Array<{
+    year: number;
+    portfolio_return: number;
+    benchmark_return: number;
+  }>;
+  assumptions: string[];
+}
+
+
+export interface StockAllocationItem {
+  instrument_id: string;
+  ticker: string;
+  company_name: string;
+  sector: string;
+  weight: number;
+  allocated_capital: number;
+  annualized_volatility: number;
+}
+
+export interface ForwardScenarioHorizon {
+  horizon_years: number;
+  bear_value: number;
+  base_value: number;
+  bull_value: number;
+  bear_cagr: number;
+  base_cagr: number;
+  bull_cagr: number;
+  prob_positive: number;
+}
+
+export interface PortfolioSimulationResponse {
+  executed_at_utc: string;
+  currency: string;
+  initial_capital: number;
+  allocation_method: string;
+  rebalance_frequency: string;
+  start_date: string;
+  end_date: string;
+  years_covered: number;
+  observations: number;
+  allocations: StockAllocationItem[];
+  portfolio_volatility: number;
+  weighted_avg_stock_volatility: number;
+  risk_reduction_pct: number;
+  diversification_ratio: number;
+  final_portfolio_value: number;
+  total_return: number;
+  cagr: number;
+  sharpe_ratio: number | null;
+  max_drawdown: number;
+  benchmark_final_value: number;
+  benchmark_cagr: number;
+  timestamps: string[];
+  equity_curve: number[];
+  benchmark_curve: number[];
+  calendar_year_returns: Array<{
+    year: number;
+    portfolio_return: number;
+    benchmark_return: number;
+  }>;
+  forward_scenarios: ForwardScenarioHorizon[];
+  excluded_tickers?: Array<{ ticker: string; reason: string }>;
+  pm_verdict: string;
+  assumptions: string[];
+}
+
+
+export interface RiskFactorSummary {
+  risk_id: string;
+  name: string;
+  category: string;
+  current_intensity: 'HIGH' | 'ELEVATED' | 'MODERATE';
+  trend: 'ESCALATING' | 'PERSISTENT' | 'MODERATING';
+  description: string;
+  ten_year_episodes: string;
+  forward_outlook_12_36m: string;
+}
+
+export interface StockRiskImpact {
+  instrument_id: string;
+  ticker: string;
+  company_name: string;
+  country: string;
+  exchange: string;
+  sector: string;
+  vulnerability_score: number;
+  impact_tier: 'SEVERE' | 'HIGH' | 'MODERATE' | 'LOW / RESILIENT';
+  historical_10y_impact: string;
+  forward_outlook: string;
+}
+
+export interface SectorRiskBreakdown {
+  sector: string;
+  severity_score: number;
+  direction: 'HEADWIND' | 'MIXED' | 'NATURAL HEDGE';
+  historical_10y_behavior: string;
+  forward_impact_forecast: string;
+  stocks_ranked: StockRiskImpact[];
+}
+
+export interface EmergingRiskHypothesis {
+  title: string;
+  probability_tier: 'HIGH' | 'MEDIUM' | 'TAIL RISK';
+  horizon: string;
+  most_exposed_sectors: string[];
+  resilient_hedge_sectors: string[];
+  transmission_mechanism: string;
+  portfolio_defense: string;
+}
+
+export interface RiskTrackerResponse {
+  generated_at_utc: string;
+  selected_risk_id: string;
+  market_filter: string;
+  active_risk_factors: RiskFactorSummary[];
+  selected_risk: RiskFactorSummary;
+  sector_impacts: SectorRiskBreakdown[];
+  emerging_hypotheses: EmergingRiskHypothesis[];
+  live_macro_signals: string[];
+}
+
 export const quantApi = {
   searchInstruments: (params: { q?: string; exchange?: string; country?: string }) => {
     const qs = new URLSearchParams();
@@ -268,6 +506,24 @@ export const quantApi = {
 
   getMarketBlueprint: (marketScope: 'US' | 'VN' | 'US_VN' | 'GLOBAL') =>
     fetchJson<MarketBlueprintResponse>(`/portfolio/diverse-risk/blueprint?market_scope=${marketScope}`),
+
+
+  getAssistantStatus: () =>
+    fetchJson<{ gemini_configured: boolean; key_prefix: string | null; gemini_model: string }>('/assistant/status'),
+
+  askPortfolioAssistant: (payload: {
+    question: string;
+    market_scope?: string;
+    selected_sectors?: string[];
+    selected_stocks?: string[];
+    portfolio_summary?: string;
+    conversation_history?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  }) =>
+    fetchJson<DiverseRiskAdvisorResponse>('/portfolio/diverse-risk/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
 
   askDiverseRiskAdvisor: (
     question: string,
@@ -362,4 +618,70 @@ export const quantApi = {
 
   getFxRates: (base = 'USD') =>
     fetchJson<FXRatesResponse>(`/fx/rates?base=${encodeURIComponent(base)}`),
+
+  analyzeCrowdSentiment: (
+    instrumentId: string,
+    companyName?: string,
+    horizon: '1W' | '1M' | '3M' = '1M',
+    recentReturn20d?: number,
+    annualizedVolatility?: number
+  ) =>
+    fetchJson<CrowdSentimentResponse>('/sentiment/crowd', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        instrument_id: instrumentId,
+        company_name: companyName,
+        horizon,
+        recent_return_20d: recentReturn20d ?? null,
+        annualized_volatility: annualizedVolatility ?? null,
+      }),
+    }),
+
+
+  getRiskTracker: (riskId = 'rates_tightening', market = 'ALL') =>
+    fetchJson<RiskTrackerResponse>(
+      `/risk/tracker?risk_id=${encodeURIComponent(riskId)}&market=${encodeURIComponent(market)}`
+    ),
+
+  runBankruptcyPipeline: (instrumentId: string, equityVolatilityAnnual?: number) =>
+    fetchJson<BankruptcyPipelineResponse>('/risk/bankruptcy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        instrument_id: instrumentId,
+        equity_volatility_annual: equityVolatilityAnnual ?? null,
+      }),
+    }),
+
+
+  simulatePortfolio10Y: (payload: {
+    instrument_ids: string[];
+    capital: number;
+    currency: string;
+    allocation_method?: 'min_variance' | 'max_sharpe' | 'equal_weight';
+    rebalance_frequency?: 'quarterly' | 'annually' | 'buy_and_hold';
+    years?: number;
+  }) =>
+    fetchJson<PortfolioSimulationResponse>('/portfolio/simulate-10y-forecast', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  runPortfolioBacktest: (payload: {
+    instrument_ids: string[];
+    years?: number;
+    allocation_method?: 'equal_weight' | 'min_variance' | 'max_sharpe';
+    rebalance_frequency?: 'quarterly' | 'annually' | 'buy_and_hold';
+    initial_capital?: number;
+  }) =>
+    fetchJson<PortfolioBacktestResponse>('/backtesting/portfolio', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
 };
+
+export const api = quantApi;
+

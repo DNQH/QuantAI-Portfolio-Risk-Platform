@@ -14,7 +14,12 @@ import {
   YAxis,
 } from 'recharts';
 import { CandlestickChart } from './components/CandlestickChart';
+import { CrowdSentimentPanel } from './components/CrowdSentimentPanel';
 import { DiverseRiskPanel } from './components/DiverseRiskPanel';
+import { MarketSelectorDropdown, type MarketSelection } from './components/MarketSelectorDropdown';
+import { TickerSearchBox } from './components/TickerSearchBox';
+import { RiskAnalyticsPanel } from './components/RiskAnalyticsPanel';
+import { RiskTrackerPanel } from './components/RiskTrackerPanel';
 import { StatusBadge } from './components/StatusBadge';
 import { en } from './i18n/en';
 import {
@@ -37,28 +42,23 @@ import type {
 type TabKey =
   | 'overview'
   | 'marketData'
-  | 'quantAnalysis'
+  | 'riskTracker'
   | 'portfolio'
   | 'risk'
   | 'fx'
-  | 'ml'
-  | 'signals'
-  | 'backtesting'
+  | 'crowdSentiment'
   | 'coverage'
-  | 'methodology';
+;
 
 const NAV_ITEMS: Array<{ key: TabKey; label: string }> = [
   { key: 'overview', label: en.nav.overview },
   { key: 'marketData', label: en.nav.marketData },
-  { key: 'quantAnalysis', label: en.nav.quantAnalysis },
+  { key: 'riskTracker', label: 'Risk Tracker' },
   { key: 'portfolio', label: en.nav.portfolio },
   { key: 'risk', label: en.nav.risk },
   { key: 'fx', label: en.nav.fx },
-  { key: 'ml', label: en.nav.ml },
-  { key: 'signals', label: en.nav.signals },
-  { key: 'backtesting', label: en.nav.backtesting },
+  { key: 'crowdSentiment', label: 'What People Think?' },
   { key: 'coverage', label: en.nav.coverage },
-  { key: 'methodology', label: en.nav.methodology },
 ];
 
 const INTERVALS = ['1m', '5m', '15m', '1h', '1d', '1wk', '1mo'] as const;
@@ -70,6 +70,35 @@ const PERIODS: Array<{ label: string; value: string }> = [
   { label: 'ALL (IPO)', value: 'max' },
 ];
 
+const cleanTicker = (id: string) => (id.includes(':') ? id.split(':')[1] : id);
+
+const ML_MODEL_EXPLANATIONS: Record<string, { purpose: string; benefit: string }> = {
+  'Naive Last Price': {
+    purpose: 'Assumes tomorrow’s price equals today’s closing price (Random Walk baseline).',
+    benefit: 'Serves as the mandatory benchmark: any ML model must beat this baseline out-of-sample to prove genuine predictive skill.',
+  },
+  'Naive Historical Mean': {
+    purpose: 'Predicts the average price observed during the chronological training period.',
+    benefit: 'Tests whether the asset behaves like a mean-reverting series versus a trending series.',
+  },
+  'Ridge Regression (L2)': {
+    purpose: 'Linear model over lagged returns and technical indicators with L2 regularization penalty.',
+    benefit: 'Prevents overfitting to noisy short-term price spikes while capturing linear trend and momentum relationships.',
+  },
+  'ARIMA (AR-4)': {
+    purpose: 'Classical statistical autoregressive model using the 4 most recent historical price lags.',
+    benefit: 'Captures short-term serial correlation and mean-reversion patterns directly from the time series.',
+  },
+  'Random Forest Regressor': {
+    purpose: 'Ensemble of decorrelated decision trees trained on bootstrapped subsets of lag & momentum features.',
+    benefit: 'Captures non-linear regime shifts and feature interactions without assuming a bell-curve distribution.',
+  },
+  'Gradient Boosting Regressor': {
+    purpose: 'Sequential tree ensemble where each new tree corrects the residual prediction errors of prior trees.',
+    benefit: 'Often achieves the lowest out-of-sample error on complex non-linear patterns when properly regularized.',
+  },
+};
+
 const fmtPct = (v: number | null | undefined) => (v == null ? 'N/A' : `${(v * 100).toFixed(2)}%`);
 const fmtNum = (v: number | null | undefined, digits = 2) => (v == null ? 'N/A' : v.toFixed(digits));
 
@@ -77,8 +106,9 @@ export const App: React.FC = () => {
   const [darkMode, setDarkMode] = useState(true);
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
   const [searchQuery, setSearchQuery] = useState('');
-  const [countryFilter, setCountryFilter] = useState<string>('');
+  const [marketSelection, setMarketSelection] = useState<MarketSelection>({ country: 'ALL', exchangeMic: 'ALL', label: 'All Markets' });
   const [instruments, setInstruments] = useState<Instrument[]>([]);
+  const [fullCatalog, setFullCatalog] = useState<Instrument[]>([]);
   const [selectedId, setSelectedId] = useState<string>('XNAS:AAPL');
 
   // Market Data Explorer controls (defaults to FULL IPO-to-present daily history!)
@@ -108,11 +138,24 @@ export const App: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
+    quantApi.searchInstruments({}).then(setFullCatalog).catch(() => setFullCatalog([]));
+  }, []);
+
+  useEffect(() => {
     quantApi
-      .searchInstruments({ q: searchQuery, country: countryFilter || undefined })
-      .then(setInstruments)
+      .searchInstruments({
+        q: searchQuery,
+        country: marketSelection.country === 'ALL' ? undefined : marketSelection.country,
+      })
+      .then((list) => {
+        const filtered =
+          marketSelection.exchangeMic === 'ALL'
+            ? list
+            : list.filter((i) => i.exchange_mic === marketSelection.exchangeMic);
+        setInstruments(filtered);
+      })
       .catch(() => setInstruments([]));
-  }, [searchQuery, countryFilter]);
+  }, [searchQuery, marketSelection]);
 
   // Fetch quote + full daily history for quantitative models whenever instrument changes
   useEffect(() => {
@@ -257,7 +300,7 @@ export const App: React.FC = () => {
         <div className="mb-6 border-b border-terminal-border pb-4 flex items-center justify-between">
           <div>
             <div className="text-lg font-bold tracking-tight">{en.brand.name}</div>
-            <div className="mt-1 font-mono text-[11px] text-emerald-400">v1.6.1 · Full Suite</div>
+            <div className="mt-1 font-mono text-[11px] text-emerald-400">v4.0.0</div>
           </div>
           <button onClick={() => setDarkMode((d) => !d)} className="rounded border border-slate-600/40 px-2 py-1 font-mono text-[10px]">
             {darkMode ? 'Light' : 'Dark'}
@@ -286,28 +329,13 @@ export const App: React.FC = () => {
             <p className="text-xs opacity-70">{en.brand.subtitle}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <select value={countryFilter} onChange={(e) => setCountryFilter(e.target.value)} className={`rounded-md border px-2.5 py-1.5 text-xs ${panelBg}`}>
-              <option value="">All Markets</option>
-              <option value="Vietnam">Vietnam (HOSE/HNX)</option>
-              <option value="United States">United States</option>
-              <option value="United Kingdom">United Kingdom</option>
-              <option value="Germany">Germany</option>
-              <option value="Japan">Japan</option>
-              <option value="Hong Kong">Hong Kong</option>
-              <option value="Singapore">Singapore</option>
-              <option value="Australia">Australia</option>
-            </select>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && searchQuery.includes(':')) {
-                  setSelectedId(searchQuery.trim().toUpperCase());
-                }
-              }}
-              placeholder="Search or type MIC:TICKER + Enter (e.g. XSTC:TCB)..."
-              className={`w-80 rounded-md border px-3 py-1.5 text-xs focus:border-blue-500 focus:outline-none ${panelBg}`}
+            <MarketSelectorDropdown value={marketSelection} onChange={setMarketSelection} darkMode={darkMode} />
+            <TickerSearchBox
+              darkMode={darkMode}
+              country={marketSelection.country}
+              exchangeMic={marketSelection.exchangeMic}
+              onSelect={(inst) => setSelectedId(inst.instrument_id)}
+              placeholder="Searching..."
             />
           </div>
         </header>
@@ -321,7 +349,7 @@ export const App: React.FC = () => {
         {/* Quick Instrument Strip */}
         {(activeTab === 'overview' || activeTab === 'marketData') && (
           <div className="mb-5 flex flex-wrap gap-2">
-            {instruments.slice(0, 18).map((inst) => (
+            {instruments.slice(0, 10).map((inst) => (
               <button
                 key={inst.instrument_id}
                 onClick={() => setSelectedId(inst.instrument_id)}
@@ -329,7 +357,7 @@ export const App: React.FC = () => {
                   selectedId === inst.instrument_id ? 'border-blue-500 bg-blue-600/20 text-blue-300' : panelBg
                 }`}
               >
-                {inst.instrument_id} · {inst.currency}
+                {cleanTicker(inst.instrument_id)}
               </button>
             ))}
           </div>
@@ -341,7 +369,7 @@ export const App: React.FC = () => {
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3 lg:grid-cols-6">
               <div className={`rounded-lg border p-4 ${panelBg}`}>
                 <div className="text-[11px] opacity-70">Instrument</div>
-                <div className="mt-1 font-mono text-base font-bold">{selectedId}</div>
+                <div className="mt-1 font-mono text-base font-bold" title={selectedId}>{cleanTicker(selectedId)}</div>
                 <div className="mt-2">{quote && <StatusBadge status={quote.data_status} delayMinutes={quote.delay_minutes} />}</div>
               </div>
               <div className={`rounded-lg border p-4 ${panelBg}`}>
@@ -429,6 +457,33 @@ export const App: React.FC = () => {
         {/* TAB 2: GLOBAL MARKET DATA EXPLORER (Full IPO History + Minute/Hour/Day Candles + Volume + Table) */}
         {activeTab === 'marketData' && (
           <div className="space-y-6">
+            <div className={`rounded-lg border p-4 flex flex-wrap items-center justify-between gap-3 ${panelBg}`}>
+              <div className="flex items-center gap-3">
+                <span className="text-lg font-bold font-mono text-blue-400" title={selectedId}>
+                  {cleanTicker(selectedId)}
+                </span>
+                <span className="text-xs opacity-75">
+                  {instruments.find((i) => i.instrument_id === selectedId)?.company_name || ''}
+                </span>
+                {quote && <StatusBadge status={quote.data_status} delayMinutes={quote.delay_minutes} />}
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('risk')}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/40 hover:bg-amber-500/25 transition"
+                >
+                  Risk Analytics →
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('crowdSentiment')}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-500/15 text-blue-300 border border-blue-500/40 hover:bg-blue-500/25 transition"
+                >
+                  What People Think? →
+                </button>
+              </div>
+            </div>
             <div className={`rounded-lg border p-4 ${panelBg}`}>
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-3">
@@ -513,58 +568,14 @@ export const App: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 'quantAnalysis' && (
-          <div className="space-y-6">
-            {!analytics ? (
-              <div className={`rounded-lg border p-8 text-center text-sm opacity-80 ${panelBg}`}>
-                Load historical OHLCV bars for <strong>{selectedId}</strong> to view Quantitative Analysis.
-              </div>
-            ) : (
-              <>
-                <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-                  <div className={`rounded-lg border p-4 ${panelBg}`}>
-                    <div className="text-xs opacity-70">Total / Annualized Return</div>
-                    <div className="mt-1 font-mono text-base font-bold">
-                      {fmtPct(analytics.summary.total_return)} / {fmtPct(analytics.summary.annualized_return)}
-                    </div>
-                  </div>
-                  <div className={`rounded-lg border p-4 ${panelBg}`}>
-                    <div className="text-xs opacity-70">Sharpe / Sortino (Rf=4%)</div>
-                    <div className="mt-1 font-mono text-base font-bold">
-                      {fmtNum(analytics.summary.sharpe_ratio)} / {fmtNum(analytics.summary.sortino_ratio)}
-                    </div>
-                  </div>
-                  <div className={`rounded-lg border p-4 ${panelBg}`}>
-                    <div className="text-xs opacity-70">Max Drawdown / Recovery</div>
-                    <div className="mt-1 font-mono text-base font-bold text-rose-400">
-                      {fmtPct(analytics.summary.max_drawdown)} ({analytics.summary.max_drawdown_recovery_bars ?? 'Unrecovered'} bars)
-                    </div>
-                  </div>
-                  <div className={`rounded-lg border p-4 ${panelBg}`}>
-                    <div className="text-xs opacity-70">RSI (14) / Skew / Kurtosis</div>
-                    <div className="mt-1 font-mono text-base font-bold">
-                      {fmtNum(analytics.summary.latest_rsi_14)} / {fmtNum(analytics.summary.skewness)} / {fmtNum(analytics.summary.excess_kurtosis)}
-                    </div>
-                  </div>
-                </div>
-                <div className={`rounded-lg border p-4 ${panelBg}`}>
-                  <h2 className="mb-3 text-sm font-semibold">Cumulative Return (%) &amp; Drawdown (%)</h2>
-                  <div className="h-72 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={chartSeries}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                        <XAxis dataKey="date" tick={{ fontSize: 11 }} />
-                        <YAxis tick={{ fontSize: 11 }} />
-                        <Tooltip />
-                        <Area type="monotone" dataKey="cumRetPct" stroke="#2563EB" fill="#2563EB" fillOpacity={0.18} name="Cumulative Return %" />
-                        <Area type="monotone" dataKey="drawdownPct" stroke="#EF4444" fill="#EF4444" fillOpacity={0.18} name="Drawdown %" />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
+        {activeTab === 'riskTracker' && (
+          <RiskTrackerPanel
+            darkMode={darkMode}
+            onInspectStockRisk={(id) => {
+              setSelectedId(id);
+              setActiveTab('risk');
+            }}
+          />
         )}
 
         {activeTab === 'portfolio' && (
@@ -592,7 +603,7 @@ export const App: React.FC = () => {
               </button>
             </div>
 
-            {portfolioSubTab === 'diverse' && <DiverseRiskPanel panelBg={panelBg} />}
+            {portfolioSubTab === 'diverse' && <DiverseRiskPanel darkMode={darkMode} availableInstruments={fullCatalog.length ? fullCatalog : instruments} />}
 
             {portfolioSubTab === 'mpt' && (
               <>
@@ -666,221 +677,23 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'risk' && (
-          <div className="space-y-6">
-            {!riskData ? (
-              <div className={`rounded-lg border p-8 text-center text-sm opacity-80 ${panelBg}`}>
-                Load historical bars for <strong>{selectedId}</strong> to compute VaR, CVaR &amp; Stress Tests.
-              </div>
-            ) : (
-              <>
-                <div className={`overflow-x-auto rounded-lg border ${panelBg}`}>
-                  <table className="w-full text-left text-xs">
-                    <thead className="border-b border-terminal-border font-mono opacity-70">
-                      <tr>
-                        <th className="p-3">VaR Methodology</th>
-                        <th className="p-3">Confidence</th>
-                        <th className="p-3">1-Day VaR (%)</th>
-                        <th className="p-3">1-Day CVaR / ES (%)</th>
-                        <th className="p-3">VaR ($100k)</th>
-                        <th className="p-3">CVaR ($100k)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-terminal-border font-mono">
-                      {riskData.var_results.map((r, i) => (
-                        <tr key={i}>
-                          <td className="p-3">{r.method}</td>
-                          <td className="p-3">{(r.confidence_level * 100).toFixed(0)}%</td>
-                          <td className="p-3 text-amber-400">{fmtPct(r.var_pct)}</td>
-                          <td className="p-3 text-rose-400">{fmtPct(r.cvar_pct)}</td>
-                          <td className="p-3">${r.var_amount.toLocaleString()}</td>
-                          <td className="p-3">${r.cvar_amount.toLocaleString()}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className={`overflow-x-auto rounded-lg border ${panelBg}`}>
-                  <table className="w-full text-left text-xs">
-                    <thead className="border-b border-terminal-border font-mono opacity-70">
-                      <tr>
-                        <th className="p-3">Stress Test Scenario</th>
-                        <th className="p-3">Shock</th>
-                        <th className="p-3">Estimated P&amp;L</th>
-                        <th className="p-3">Post-Shock Value</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-terminal-border font-mono">
-                      {riskData.stress_scenarios.map((s) => (
-                        <tr key={s.scenario_name}>
-                          <td className="p-3 font-sans">{s.scenario_name}</td>
-                          <td className="p-3 text-rose-400">{fmtPct(s.shock_pct)}</td>
-                          <td className="p-3 text-rose-400">${s.estimated_pnl.toLocaleString()}</td>
-                          <td className="p-3">${s.post_shock_value.toLocaleString()}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )}
-          </div>
+          <RiskAnalyticsPanel
+            instrumentId={selectedId}
+            cleanTicker={cleanTicker(selectedId)}
+            riskData={riskData}
+            darkMode={darkMode}
+          />
         )}
 
-        {activeTab === 'ml' && (
-          <div className="space-y-6">
-            {!forecastData ? (
-              <div className={`rounded-lg border p-8 text-center text-sm opacity-80 ${panelBg}`}>
-                At least 40 historical bars for <strong>{selectedId}</strong> are required to run chronological ML evaluation.
-              </div>
-            ) : (
-              <>
-                <div className={`rounded-lg border p-4 text-xs font-mono flex flex-wrap gap-6 ${panelBg}`}>
-                  <div>Train: {forecastData.train_start.slice(0, 10)} → {forecastData.train_end.slice(0, 10)} ({forecastData.train_samples} obs)</div>
-                  <div>Test: {forecastData.test_start.slice(0, 10)} → {forecastData.test_end.slice(0, 10)} ({forecastData.test_samples} obs)</div>
-                </div>
-                <div className={`overflow-x-auto rounded-lg border ${panelBg}`}>
-                  <table className="w-full text-left text-xs">
-                    <thead className="border-b border-terminal-border font-mono opacity-70">
-                      <tr>
-                        <th className="p-3">Model</th>
-                        <th className="p-3">Family</th>
-                        <th className="p-3">Test MAE</th>
-                        <th className="p-3">Test RMSE</th>
-                        <th className="p-3">Walk-Forward RMSE</th>
-                        <th className="p-3">R²</th>
-                        <th className="p-3">Next-Bar Estimate</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-terminal-border font-mono">
-                      {forecastData.models.map((m) => (
-                        <tr key={m.model_name}>
-                          <td className="p-3 font-semibold">{m.model_name}</td>
-                          <td className="p-3 font-sans">{m.model_family}</td>
-                          <td className="p-3">{fmtNum(m.mae, 3)}</td>
-                          <td className="p-3">{fmtNum(m.rmse, 3)}</td>
-                          <td className="p-3">{fmtNum(m.walk_forward_rmse, 3)}</td>
-                          <td className="p-3">{fmtNum(m.r_squared, 3)}</td>
-                          <td className="p-3 text-blue-400">{m.next_step_predicted_price.toLocaleString()}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <p className="text-xs opacity-70">{forecastData.disclaimer}</p>
-              </>
-            )}
-          </div>
-        )}
-
-        {activeTab === 'signals' && (
-          <div className="space-y-4">
-            {!signalsData ? (
-              <div className={`rounded-lg border p-8 text-center text-sm opacity-80 ${panelBg}`}>
-                Load at least 15 historical bars for <strong>{selectedId}</strong> to evaluate rules-based signals.
-              </div>
-            ) : (
-              <>
-                <div className={`rounded-lg border p-4 flex items-center justify-between ${panelBg}`}>
-                  <div>
-                    <div className="text-xs opacity-70">Composite Rules-Based Signal ({selectedId})</div>
-                    <div className="text-lg font-bold font-mono">{signalsData.composite_signal}</div>
-                  </div>
-                  <div className="font-mono text-xs">
-                    Bullish: {signalsData.bullish_count} · Bearish: {signalsData.bearish_count} · Neutral: {signalsData.neutral_count}
-                  </div>
-                </div>
-                <div className={`overflow-x-auto rounded-lg border ${panelBg}`}>
-                  <table className="w-full text-left text-xs">
-                    <thead className="border-b border-terminal-border font-mono opacity-70">
-                      <tr>
-                        <th className="p-3">Indicator Rule</th>
-                        <th className="p-3">Direction</th>
-                        <th className="p-3">Observed</th>
-                        <th className="p-3">Condition</th>
-                        <th className="p-3">Rationale</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-terminal-border">
-                      {signalsData.rules.map((r) => (
-                        <tr key={r.rule_name}>
-                          <td className="p-3 font-semibold">{r.rule_name}</td>
-                          <td className="p-3 font-mono">{r.direction}</td>
-                          <td className="p-3 font-mono">{r.observed_value ?? 'N/A'}</td>
-                          <td className="p-3 font-mono opacity-80">{r.condition}</td>
-                          <td className="p-3 opacity-80">{r.rationale}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {activeTab === 'backtesting' && (
-          <div className="space-y-6">
-            <div className={`rounded-lg border p-4 flex flex-wrap items-center justify-between gap-3 ${panelBg}`}>
-              <div className="text-xs">
-                Strategy Backtest for <strong className="font-mono">{selectedId}</strong> (T+1 execution, 10 bps commission, 5 bps slippage)
-              </div>
-              <select
-                value={backtestStrategy}
-                onChange={(e) => setBacktestStrategy(e.target.value as 'sma_crossover' | 'rsi_mean_reversion' | 'buy_and_hold')}
-                className={`rounded border px-3 py-1 font-mono text-xs ${panelBg}`}
-              >
-                <option value="sma_crossover">SMA 10/20 Crossover</option>
-                <option value="rsi_mean_reversion">RSI (14) Mean Reversion</option>
-                <option value="buy_and_hold">Buy &amp; Hold Benchmark</option>
-              </select>
-            </div>
-            {backtestData && (
-              <>
-                <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-                  <div className={`rounded-lg border p-4 ${panelBg}`}>
-                    <div className="text-xs opacity-70">Final Value / Total Return</div>
-                    <div className="mt-1 font-mono text-base font-bold">
-                      ${backtestData.final_portfolio_value.toLocaleString()} ({fmtPct(backtestData.total_return)})
-                    </div>
-                  </div>
-                  <div className={`rounded-lg border p-4 ${panelBg}`}>
-                    <div className="text-xs opacity-70">Benchmark (Buy &amp; Hold)</div>
-                    <div className="mt-1 font-mono text-base font-bold">
-                      ${backtestData.benchmark_final_value.toLocaleString()} ({fmtPct(backtestData.benchmark_total_return)})
-                    </div>
-                  </div>
-                  <div className={`rounded-lg border p-4 ${panelBg}`}>
-                    <div className="text-xs opacity-70">Sharpe / Max Drawdown</div>
-                    <div className="mt-1 font-mono text-base font-bold">
-                      {fmtNum(backtestData.sharpe_ratio)} / {fmtPct(backtestData.max_drawdown)}
-                    </div>
-                  </div>
-                  <div className={`rounded-lg border p-4 ${panelBg}`}>
-                    <div className="text-xs opacity-70">Trades / Win Rate / Costs</div>
-                    <div className="mt-1 font-mono text-base font-bold">
-                      {backtestData.number_of_trades} / {fmtPct(backtestData.win_rate)} / ${backtestData.total_transaction_costs}
-                    </div>
-                  </div>
-                </div>
-                <div className={`rounded-lg border p-4 ${panelBg}`}>
-                  <h2 className="mb-3 text-sm font-semibold">Strategy Equity Curve vs Buy &amp; Hold Benchmark ($)</h2>
-                  <div className="h-72 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={backtestSeries}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                        <XAxis dataKey="date" tick={{ fontSize: 11 }} />
-                        <YAxis tick={{ fontSize: 11 }} />
-                        <Tooltip />
-                        <Legend />
-                        <Line type="monotone" dataKey="strategy" stroke="#10B981" dot={false} strokeWidth={2} name="Strategy ($)" />
-                        <Line type="monotone" dataKey="benchmark" stroke="#64748B" dot={false} strokeDasharray="4 4" name="Buy & Hold ($)" />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
+        {activeTab === 'crowdSentiment' && (
+          <CrowdSentimentPanel
+            instrumentId={selectedId}
+            cleanTicker={cleanTicker(selectedId)}
+            companyName={instruments.find((i) => i.instrument_id === selectedId)?.company_name || cleanTicker(selectedId)}
+            recentReturn20d={analytics?.cumulative_return ?? null}
+            annualizedVol={analytics?.annualized_volatility ?? null}
+            darkMode={darkMode}
+          />
         )}
 
         {activeTab === 'fx' && (
@@ -959,38 +772,23 @@ export const App: React.FC = () => {
             <table className="w-full text-left text-xs">
               <thead className="border-b border-terminal-border font-mono opacity-70">
                 <tr>
-                  <th className="p-3">MIC / Exchange</th>
-                  <th className="p-3">Country / CCY</th>
-                  <th className="p-3">Phase</th>
-                  <th className="p-3">Quote Status</th>
-                  <th className="p-3">Primary Provider</th>
-                  <th className="p-3">Notes</th>
+                  <th className="p-3">Exchange</th>
+                  <th className="p-3">Country / Currency</th>
+                  <th className="p-3">Feed Status</th>
+                  <th className="p-3">Data Provider</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-terminal-border">
                 {coverage.map((row) => (
                   <tr key={row.exchange_mic}>
-                    <td className="p-3 font-mono font-semibold">{row.exchange_mic} ({row.exchange_acronym})</td>
+                    <td className="p-3 font-semibold">{row.exchange_acronym} <span className="opacity-60 font-normal">· {row.exchange_name}</span></td>
                     <td className="p-3">{row.country} · {row.currency}</td>
-                    <td className="p-3 font-mono">{row.phase}</td>
                     <td className="p-3"><StatusBadge status={row.quote_data_status} /></td>
-                    <td className="p-3">{row.primary_provider}</td>
-                    <td className="p-3 opacity-80">{row.notes}</td>
+                    <td className="p-3 opacity-85">{row.primary_provider}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </div>
-        )}
-
-        {activeTab === 'methodology' && (
-          <div className={`max-w-3xl space-y-3 rounded-lg border p-6 text-sm ${panelBg}`}>
-            <h2 className="text-base font-bold">Quantitative Methodology &amp; Data Provenance</h2>
-            <p className="opacity-80">
-              All QuantAI analytics, MPT portfolio optimizations, VaR/CVaR risk models, leakage-free ML forecasts, and
-              T+1 backtests run server-side in Python (NumPy, Pandas, SciPy). Full formulas and assumptions are documented
-              in <code>docs/financial_formulas.md</code> and <code>docs/data_sources.md</code>.
-            </p>
           </div>
         )}
       </main>

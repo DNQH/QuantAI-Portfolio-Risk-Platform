@@ -101,6 +101,16 @@ EXCHANGE_SCHEDULES: Dict[str, ExchangeSchedule] = {
         regular_close=time(15, 0),
         holidays_2026=VN_HOLIDAYS_2026,
     ),
+    "XUPC": ExchangeSchedule(
+        mic="XUPC",
+        acronym="UPCOM",
+        timezone_name="Asia/Ho_Chi_Minh",
+        regular_open=time(9, 0),
+        lunch_start=time(11, 30),
+        lunch_end=time(13, 0),
+        regular_close=time(15, 0),
+        holidays_2026=VN_HOLIDAYS_2026,
+    ),
 }
 
 

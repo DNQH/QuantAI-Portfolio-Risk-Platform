@@ -17,6 +17,9 @@ from app.analytics.engine import (
     run_single_asset_analytics,
 )
 from app.backtesting.engine import (
+    PortfolioBacktestRequest,
+    PortfolioBacktestResponse,
+    run_portfolio_backtest,
     BacktestRequest,
     BacktestResponse,
     SignalsResponse,
@@ -39,6 +42,11 @@ from app.core.symbology import parse_instrument_id, resolve_effective_exchange
 from app.data.registry import MarketDataRegistry
 from app.forecasting.models import ForecastRequest, ForecastResponse, run_forecasting_suite
 from app.fx.frankfurter import TARGET_CURRENCIES
+from app.portfolio.simulator import (
+    PortfolioSimulationRequest,
+    PortfolioSimulationResponse,
+    run_portfolio_10y_simulation,
+)
 from app.portfolio.advisor import (
     DiverseRiskAdvisorRequest,
     DiverseRiskAdvisorResponse,
@@ -64,6 +72,9 @@ from app.portfolio.optimizer import (
     optimize_portfolio,
 )
 from app.risk.engine import RiskAnalysisRequest, RiskAnalysisResponse, run_risk_analysis
+from app.risk.bankruptcy import BankruptcyPipelineResponse, BankruptcyRequest, run_bankruptcy_pipeline
+from app.risk.tracker import RiskTrackerResponse, build_risk_tracker_report
+from app.sentiment.crowd_engine import CrowdSentimentRequest, CrowdSentimentResponse, analyze_crowd_sentiment
 
 router = APIRouter(prefix="/api/v1", tags=["quantai"])
 
@@ -226,6 +237,18 @@ def diverse_risk_endpoint(payload: DiverseRiskRequest) -> DiverseRiskResponse:
 
 
 
+@router.get("/assistant/status")
+def assistant_status_endpoint(
+    registry: MarketDataRegistry = Depends(get_registry),
+) -> Dict[str, object]:
+    key = registry.settings.gemini_api_key
+    return {
+        "gemini_configured": bool(key),
+        "key_prefix": (key[:6] + "...") if key and len(key) >= 6 else None,
+        "gemini_model": registry.settings.gemini_model,
+    }
+
+
 @router.post("/portfolio/diverse-risk/ask", response_model=DiverseRiskAdvisorResponse)
 def diverse_risk_advisor_endpoint(
     payload: DiverseRiskAdvisorRequest,
@@ -283,6 +306,111 @@ def signals_endpoint(payload: SignalsRequest) -> SignalsResponse:
 @router.post("/backtesting/run", response_model=BacktestResponse)
 def backtest_endpoint(payload: BacktestRequest) -> BacktestResponse:
     return run_backtest(payload)
+
+
+@router.post("/sentiment/crowd", response_model=CrowdSentimentResponse)
+def crowd_sentiment_endpoint(
+    payload: CrowdSentimentRequest,
+    registry: MarketDataRegistry = Depends(get_registry),
+) -> CrowdSentimentResponse:
+    return analyze_crowd_sentiment(payload, finnhub_api_key=registry.settings.finnhub_api_key)
+
+
+@router.get("/risk/tracker", response_model=RiskTrackerResponse)
+def risk_tracker_endpoint(
+    risk_id: str = Query(default="rates_tightening"),
+    market: str = Query(default="ALL"),
+) -> RiskTrackerResponse:
+    return build_risk_tracker_report(risk_id=risk_id, market_filter=market)
+
+
+@router.post("/risk/bankruptcy", response_model=BankruptcyPipelineResponse)
+def bankruptcy_pipeline_endpoint(
+    payload: BankruptcyRequest,
+    registry: MarketDataRegistry = Depends(get_registry),
+) -> BankruptcyPipelineResponse:
+    mic, ticker = parse_instrument_id(payload.instrument_id) if ":" in payload.instrument_id else ("XNAS", payload.instrument_id)
+    matches = registry.search_instruments(query=ticker)
+    matched = next((m for m in matches if m.instrument_id.upper() == payload.instrument_id.upper()), matches[0] if matches else None)
+    return run_bankruptcy_pipeline(
+        payload,
+        company_name_hint=matched.company_name if matched else ticker,
+        currency_hint=matched.currency if matched else "USD",
+    )
+
+
+@router.post("/portfolio/simulate-10y-forecast", response_model=PortfolioSimulationResponse)
+def portfolio_simulate_10y_endpoint(
+    payload: PortfolioSimulationRequest,
+    registry: MarketDataRegistry = Depends(get_registry),
+) -> PortfolioSimulationResponse:
+    meta_map: Dict[str, Dict[str, str]] = {}
+    for iid in payload.instrument_ids:
+        _, tkr = parse_instrument_id(iid) if ":" in iid else ("XNAS", iid)
+        matches = registry.search_instruments(query=tkr)
+        m = next((x for x in matches if x.instrument_id.upper() == iid.upper()), matches[0] if matches else None)
+        meta_map[iid] = {
+            "company_name": m.company_name if m else tkr,
+            "sector": (m.sector or "Equity") if m else "Equity",
+        }
+    if payload.asset_series is None:
+        fetched: Dict[str, List[OHLCVBar]] = {}
+        excluded_list: List[Dict[str, str]] = []
+        period_str = "10y" if payload.years >= 10 else ("5y" if payload.years >= 5 else "2y")
+        for iid in payload.instrument_ids:
+            ohlcv = registry.get_ohlcv(
+                instrument_id=iid,
+                interval="1d",
+                period=period_str,
+                allow_educational_fallback=True,
+            )
+            if ohlcv.bars and len(ohlcv.bars) >= 20:
+                fetched[iid] = ohlcv.bars
+            else:
+                tkr = iid.split(":", 1)[1] if ":" in iid else iid
+                excluded_list.append({"ticker": tkr, "reason": ohlcv.unavailable_reason or "Insufficient historical bars returned by data providers."})
+        if len(fetched) < 2:
+            raise HTTPException(
+                status_code=422,
+                detail="Insufficient historical data for at least 2 selected stocks. Verify network access or pick liquid tickers.",
+            )
+        payload = payload.copy(update={"asset_series": fetched})
+    try:
+        res = run_portfolio_10y_simulation(payload, metadata_map=meta_map)
+        if 'excluded_list' in locals() and excluded_list:
+            res = res.copy(update={'excluded_tickers': excluded_list})
+        return res
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.post("/backtesting/portfolio", response_model=PortfolioBacktestResponse)
+def portfolio_backtest_endpoint(
+    payload: PortfolioBacktestRequest,
+    registry: MarketDataRegistry = Depends(get_registry),
+) -> PortfolioBacktestResponse:
+    if payload.asset_series is None:
+        fetched: Dict[str, List[OHLCVBar]] = {}
+        period_str = "10y" if payload.years >= 10 else ("5y" if payload.years >= 5 else "2y")
+        for iid in payload.instrument_ids:
+            ohlcv = registry.get_ohlcv(
+                instrument_id=iid,
+                interval="1d",
+                period=period_str,
+                allow_educational_fallback=True,
+            )
+            if ohlcv.bars and len(ohlcv.bars) >= 20:
+                fetched[iid] = ohlcv.bars
+        if len(fetched) < 2:
+            raise HTTPException(
+                status_code=422,
+                detail="Could not fetch sufficient 10-year historical bars for at least 2 selected stocks. Verify network access or select liquid tickers.",
+            )
+        payload = payload.copy(update={"asset_series": fetched})
+    try:
+        return run_portfolio_backtest(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 @router.websocket("/ws/quotes/{instrument_id}")

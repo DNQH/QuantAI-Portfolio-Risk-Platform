@@ -96,12 +96,136 @@ class MarketDataRegistry:
         results = search_seed_instruments(
             query=query, exchange=exchange, country=country, sector=sector, as_of=as_of
         )
-        if query.strip() and self.finnhub.is_configured() and (not country or "united states" in country.lower()):
+        q_clean = query.strip()
+        if q_clean:
             existing_ids = {i.instrument_id for i in results}
-            for item in self.finnhub.search_instruments(query):
-                if item.instrument_id not in existing_ids:
-                    results.append(item)
-                    existing_ids.add(item.instrument_id)
+            # 1. Finnhub live US search
+            if self.finnhub.is_configured() and (not country or "united states" in country.lower()):
+                for item in self.finnhub.search_instruments(q_clean):
+                    if item.instrument_id not in existing_ids:
+                        results.append(item)
+                        existing_ids.add(item.instrument_id)
+            # 2. Twelve Data global symbol_search across all exchanges (when key configured)
+            if self.twelvedata.is_configured() and len(results) < 20:
+                try:
+                    import httpx
+                    from app.core.models import AssetType
+                    td_mic_map = {
+                        "NYSE": ("XNYS", "United States", "USD", "America/New_York"),
+                        "NASDAQ": ("XNAS", "United States", "USD", "America/New_York"),
+                        "HOSE": ("XSTC", "Vietnam", "VND", "Asia/Ho_Chi_Minh"),
+                        "HNX": ("XHAI", "Vietnam", "VND", "Asia/Ho_Chi_Minh"),
+                        "UPCOM": ("XUPC", "Vietnam", "VND", "Asia/Ho_Chi_Minh"),
+                        "LSE": ("XLON", "United Kingdom", "GBP", "Europe/London"),
+                        "XETR": ("XETR", "Germany", "EUR", "Europe/Berlin"),
+                        "TSE": ("XTKS", "Japan", "JPY", "Asia/Tokyo"),
+                        "HKEX": ("XHKG", "Hong Kong", "HKD", "Asia/Hong_Kong"),
+                        "SGX": ("XSES", "Singapore", "SGD", "Asia/Singapore"),
+                        "ASX": ("XASX", "Australia", "AUD", "Australia/Sydney"),
+                    }
+                    with httpx.Client(timeout=3.0) as client:
+                        resp = client.get(
+                            "https://api.twelvedata.com/symbol_search",
+                            params={"symbol": q_clean, "outputsize": 15, "apikey": self.settings.twelvedata_api_key},
+                        )
+                        if resp.status_code == 200:
+                            for row in (resp.json().get("data") or [])[:15]:
+                                sym = str(row.get("symbol") or "").strip().upper()
+                                ex_name = str(row.get("exchange") or "").strip().upper()
+                                ctry = str(row.get("country") or "").strip()
+                                if not sym:
+                                    continue
+                                mic, resolved_ctry, ccy, tz = td_mic_map.get(
+                                    ex_name,
+                                    ("XNAS", ctry or "United States", str(row.get("currency") or "USD"), "America/New_York"),
+                                )
+                                if country and country.lower() not in resolved_ctry.lower():
+                                    continue
+                                if exchange and exchange.upper() not in {mic, ex_name}:
+                                    continue
+                                iid = f"{mic}:{sym}"
+                                if iid in existing_ids:
+                                    continue
+                                existing_ids.add(iid)
+                                results.append(
+                                    Instrument(
+                                        instrument_id=iid,
+                                        ticker=sym,
+                                        exchange_mic=mic,
+                                        exchange_acronym=ex_name or mic,
+                                        company_name=str(row.get("instrument_name") or sym),
+                                        country=resolved_ctry,
+                                        currency=ccy,
+                                        sector=None,
+                                        industry=None,
+                                        asset_type=AssetType.ETF if "etf" in str(row.get("instrument_type", "")).lower() else AssetType.EQUITY,
+                                        timezone=tz,
+                                    )
+                                )
+                except Exception:
+                    pass
+            # 3. Yahoo Finance global autocomplete fallback (zero-key, covers all listed stocks worldwide)
+            if len(results) < 15:
+                try:
+                    import httpx
+                    from app.core.models import AssetType
+                    yf_ex_map = {
+                        "NMS": ("XNAS", "NASDAQ", "United States", "USD", "America/New_York"),
+                        "NGM": ("XNAS", "NASDAQ", "United States", "USD", "America/New_York"),
+                        "NYQ": ("XNYS", "NYSE", "United States", "USD", "America/New_York"),
+                        "PCX": ("XNYS", "NYSE", "United States", "USD", "America/New_York"),
+                        "LSE": ("XLON", "LSE", "United Kingdom", "GBP", "Europe/London"),
+                        "GER": ("XETR", "Xetra", "Germany", "EUR", "Europe/Berlin"),
+                        "JPX": ("XTKS", "TSE", "Japan", "JPY", "Asia/Tokyo"),
+                        "HKG": ("XHKG", "HKEX", "Hong Kong", "HKD", "Asia/Hong_Kong"),
+                        "SES": ("XSES", "SGX", "Singapore", "SGD", "Asia/Singapore"),
+                        "ASX": ("XASX", "ASX", "Australia", "AUD", "Australia/Sydney"),
+                        "HOSE": ("XSTC", "HOSE", "Vietnam", "VND", "Asia/Ho_Chi_Minh"),
+                    }
+                    with httpx.Client(timeout=3.0, headers={"User-Agent": "Mozilla/5.0"}) as client:
+                        resp = client.get(
+                            "https://query2.finance.yahoo.com/v1/finance/search",
+                            params={"q": q_clean, "quotesCount": 12, "newsCount": 0},
+                        )
+                        if resp.status_code == 200:
+                            for q_item in (resp.json().get("quotes") or []):
+                                qtype = str(q_item.get("quoteType") or "").upper()
+                                if qtype not in {"EQUITY", "ETF"}:
+                                    continue
+                                raw_sym = str(q_item.get("symbol") or "").upper()
+                                ex_code = str(q_item.get("exchange") or "").upper()
+                                clean_sym = raw_sym.split(".")[0]
+                                if raw_sym.endswith(".VN"):
+                                    mic, acr, ctry, ccy, tz = ("XSTC", "HOSE", "Vietnam", "VND", "Asia/Ho_Chi_Minh")
+                                else:
+                                    mic, acr, ctry, ccy, tz = yf_ex_map.get(
+                                        ex_code, ("XNAS", ex_code or "GLOBAL", "United States", "USD", "America/New_York")
+                                    )
+                                if country and country.lower() not in ctry.lower():
+                                    continue
+                                if exchange and exchange.upper() not in {mic, acr.upper()}:
+                                    continue
+                                iid = f"{mic}:{clean_sym}"
+                                if iid in existing_ids:
+                                    continue
+                                existing_ids.add(iid)
+                                results.append(
+                                    Instrument(
+                                        instrument_id=iid,
+                                        ticker=clean_sym,
+                                        exchange_mic=mic,
+                                        exchange_acronym=acr,
+                                        company_name=str(q_item.get("shortname") or q_item.get("longname") or clean_sym),
+                                        country=ctry,
+                                        currency=ccy,
+                                        sector=q_item.get("sector"),
+                                        industry=q_item.get("industry"),
+                                        asset_type=AssetType.ETF if qtype == "ETF" else AssetType.EQUITY,
+                                        timezone=tz,
+                                    )
+                                )
+                except Exception:
+                    pass
         return results
 
     def get_quote(
@@ -153,7 +277,7 @@ class MarketDataRegistry:
             return self.yfinance_fallback.get_quote(ticker, eff_mic)
 
         # Vietnam Equities (HOSE / HNX)
-        if eff_mic in {"XSTC", "XHAI"}:
+        if eff_mic in {"XSTC", "XHAI", "XUPC"}:
             if self.ssi.is_configured():
                 quote = self.ssi.get_quote(ticker, eff_mic)
                 if quote.data_status != DataStatus.DATA_UNAVAILABLE:
@@ -214,6 +338,164 @@ class MarketDataRegistry:
             unavailable_reason=f"Live quote for {eff_mic} requires a paid provider (EODHD / Twelve Data); enable educational fallback for delayed/historical quotes.",
         )
 
+
+    def _fetch_vietnam_public_ohlcv(
+        self, ticker: str, exchange_mic: str, years: int = 10
+    ) -> Optional[OHLCVResponse]:
+        """Fetch daily OHLCV for HOSE/HNX/UPCOM from VNDirect dchart & TCBS public APIs (zero-key)."""
+        import time as _time
+        import httpx
+        from app.core.models import OHLCVBar
+
+        now_utc = datetime.now(timezone.utc)
+        to_ts = int(_time.time())
+        from_ts = to_ts - int(years * 365.25 * 86400)
+        sym = ticker.upper().strip()
+        bars: List[OHLCVBar] = []
+        provider_used = "vndirect_dchart"
+
+        try:
+            with httpx.Client(timeout=8.0, headers={"User-Agent": "Mozilla/5.0"}) as client:
+                # 1. VNDirect dchart (covers all ~1,600 HOSE, HNX, UPCOM stocks)
+                r = client.get(
+                    "https://dchart-api.vndirect.com.vn/dchart/history",
+                    params={"resolution": "D", "symbol": sym, "from": from_ts, "to": to_ts},
+                )
+                if r.status_code == 200:
+                    d = r.json()
+                    if d.get("s") == "ok" and d.get("t"):
+                        ts_list, o_list, h_list, l_list, c_list, v_list = (
+                            d.get("t", []), d.get("o", []), d.get("h", []),
+                            d.get("l", []), d.get("c", []), d.get("v", []),
+                        )
+                        for i in range(len(ts_list)):
+                            c_val = float(c_list[i])
+                            if c_val <= 0:
+                                continue
+                            # VNDirect prices are in thousands of VND (e.g. 95.5 = 95,500 VND)
+                            scale = 1000.0 if c_val < 1000.0 else 1.0
+                            bars.append(
+                                OHLCVBar(
+                                    timestamp=datetime.fromtimestamp(int(ts_list[i]), tz=timezone.utc),
+                                    open=round(float(o_list[i]) * scale, 2),
+                                    high=round(float(h_list[i]) * scale, 2),
+                                    low=round(float(l_list[i]) * scale, 2),
+                                    close=round(c_val * scale, 2),
+                                    adjusted_close=round(c_val * scale, 2),
+                                    volume=float(v_list[i]) if i < len(v_list) and v_list[i] is not None else 0.0,
+                                )
+                            )
+                # 2. Fallback: TCBS public long-term bars API (also covers HOSE, HNX, UPCOM)
+                if len(bars) < 20:
+                    provider_used = "tcbs_public"
+                    r2 = client.get(
+                        "https://apipubaws.tcbs.com.vn/stock-insight/v1/stock/bars-long-term",
+                        params={"ticker": sym, "type": "stock", "resolution": "D", "from": from_ts, "to": to_ts},
+                    )
+                    if r2.status_code == 200:
+                        rows = r2.json().get("data") or []
+                        for row in rows:
+                            c_val = float(row.get("close") or 0.0)
+                            if c_val <= 0:
+                                continue
+                            raw_t = row.get("tradingDate") or ""
+                            try:
+                                dt = datetime.fromisoformat(str(raw_t).replace("Z", "+00:00"))
+                                if dt.tzinfo is None:
+                                    dt = dt.replace(tzinfo=timezone.utc)
+                            except Exception:
+                                continue
+                            bars.append(
+                                OHLCVBar(
+                                    timestamp=dt,
+                                    open=float(row.get("open") or c_val),
+                                    high=float(row.get("high") or c_val),
+                                    low=float(row.get("low") or c_val),
+                                    close=c_val,
+                                    adjusted_close=c_val,
+                                    volume=float(row.get("volume") or 0.0),
+                                )
+                            )
+        except Exception:
+            pass
+
+        if len(bars) >= 20:
+            bars.sort(key=lambda b: b.timestamp)
+            return OHLCVResponse(
+                instrument_id=f"{exchange_mic}:{sym}",
+                ticker=sym,
+                exchange_mic=exchange_mic,
+                currency="VND",
+                interval="1d",
+                provider=provider_used,
+                data_status=DataStatus.HISTORICAL,
+                retrieval_timestamp=now_utc,
+                bars=bars,
+            )
+        return None
+
+    def _fetch_twelvedata_ohlcv(
+        self, ticker: str, exchange_mic: str
+    ) -> Optional[OHLCVResponse]:
+        """Fallback daily OHLCV via Twelve Data /time_series when yfinance misses a global ticker."""
+        if not self.twelvedata.is_configured():
+            return None
+        import httpx
+        from app.core.models import OHLCVBar
+
+        now_utc = datetime.now(timezone.utc)
+        sym = ticker.upper().strip()
+        ex_map = {
+            "XNYS": "NYSE", "XNAS": "NASDAQ", "XLON": "LSE", "XETR": "XETR",
+            "XTKS": "TSE", "XHKG": "HKEX", "XSES": "SGX", "XASX": "ASX",
+        }
+        params = {
+            "symbol": sym,
+            "interval": "1day",
+            "outputsize": 2600,
+            "apikey": self.settings.twelvedata_api_key,
+        }
+        if exchange_mic in ex_map:
+            params["exchange"] = ex_map[exchange_mic]
+        try:
+            with httpx.Client(timeout=8.0) as client:
+                r = client.get("https://api.twelvedata.com/time_series", params=params)
+                if r.status_code == 200:
+                    vals = r.json().get("values") or []
+                    bars: List[OHLCVBar] = []
+                    for row in vals:
+                        c_val = float(row.get("close") or 0.0)
+                        if c_val <= 0:
+                            continue
+                        dt = datetime.fromisoformat(str(row["datetime"])[:10]).replace(tzinfo=timezone.utc)
+                        bars.append(
+                            OHLCVBar(
+                                timestamp=dt,
+                                open=float(row.get("open") or c_val),
+                                high=float(row.get("high") or c_val),
+                                low=float(row.get("low") or c_val),
+                                close=c_val,
+                                adjusted_close=c_val,
+                                volume=float(row.get("volume") or 0.0),
+                            )
+                        )
+                    if len(bars) >= 20:
+                        bars.sort(key=lambda b: b.timestamp)
+                        return OHLCVResponse(
+                            instrument_id=f"{exchange_mic}:{sym}",
+                            ticker=sym,
+                            exchange_mic=exchange_mic,
+                            currency=CURRENCY_BY_MIC.get(exchange_mic, "USD"),
+                            interval="1d",
+                            provider="twelvedata",
+                            data_status=DataStatus.HISTORICAL,
+                            retrieval_timestamp=now_utc,
+                            bars=bars,
+                        )
+        except Exception:
+            pass
+        return None
+
     def get_ohlcv(
         self,
         instrument_id: str,
@@ -244,13 +526,19 @@ class MarketDataRegistry:
                 unavailable_reason=f"Exchange {eff_mic} is not yet integrated.",
             )
 
-        if eff_mic in {"XSTC", "XHAI"} and self.vnstock.is_configured() and period != "max":
+        if eff_mic in {"XSTC", "XHAI", "XUPC"} and self.vnstock.is_configured() and period != "max":
             resp = self.vnstock.get_ohlcv(ticker, eff_mic, interval, start_date, end_date)
             if resp.data_status != DataStatus.DATA_UNAVAILABLE:
                 return resp
 
+        # For Vietnam HNX/UPCOM (and HOSE fallback), try direct VNDirect/TCBS public OHLCV first if HNX/UPCOM
+        if eff_mic in {"XHAI", "XUPC"} and interval == "1d":
+            vn_pub = self._fetch_vietnam_public_ohlcv(ticker, eff_mic, years=10)
+            if vn_pub is not None:
+                return vn_pub
+
         if allow_educational_fallback:
-            return self.yfinance_fallback.get_ohlcv(
+            yf_resp = self.yfinance_fallback.get_ohlcv(
                 ticker=ticker,
                 exchange_mic=eff_mic,
                 interval=interval,
@@ -258,6 +546,18 @@ class MarketDataRegistry:
                 end_date=end_date,
                 period=period,
             )
+            if yf_resp.bars and len(yf_resp.bars) >= 20:
+                return yf_resp
+            # If yfinance returned empty/sparse (e.g. VN HOSE/HNX/UPCOM or international), try public VN & Twelve Data fallbacks
+            if eff_mic in {"XSTC", "XHAI", "XUPC"} and interval == "1d":
+                vn_pub = self._fetch_vietnam_public_ohlcv(ticker, eff_mic, years=10)
+                if vn_pub is not None:
+                    return vn_pub
+            if interval == "1d":
+                td_resp = self._fetch_twelvedata_ohlcv(ticker, eff_mic)
+                if td_resp is not None:
+                    return td_resp
+            return yf_resp
 
         return OHLCVResponse(
             instrument_id=canonical_id,
@@ -277,8 +577,17 @@ class MarketDataRegistry:
         vnstock_ready = self.vnstock.is_configured()
         yf_ready = self.yfinance_fallback.is_configured()
 
-        global_cov_status = CoverageStatus.DELAYED_AVAILABLE if yf_ready else CoverageStatus.NOT_SUPPORTED
-        global_quote_status = DataStatus.DELAYED if yf_ready else DataStatus.DATA_UNAVAILABLE
+        global_live_ready = self.twelvedata.is_configured() or self.eodhd.is_configured()
+        global_cov_status = (
+            CoverageStatus.LIVE_VERIFIED
+            if global_live_ready
+            else (CoverageStatus.DELAYED_AVAILABLE if yf_ready else CoverageStatus.NOT_SUPPORTED)
+        )
+        global_quote_status = (
+            DataStatus.LIVE
+            if global_live_ready
+            else (DataStatus.DELAYED if yf_ready else DataStatus.DATA_UNAVAILABLE)
+        )
         global_hist_status = DataStatus.HISTORICAL if yf_ready else DataStatus.DATA_UNAVAILABLE
 
         return [
@@ -331,11 +640,23 @@ class MarketDataRegistry:
                 notes="Active through 2026-12-23; effective-dated transfer to HOSE (XSTC) on 2026-12-28.",
             ),
             ExchangeCoverageEntry(
+                exchange_mic="XUPC", exchange_acronym="UPCOM", exchange_name="Vietnam Unlisted Public Company Market (UPCoM)",
+                region="Southeast Asia", country="Vietnam", currency="VND", timezone="Asia/Ho_Chi_Minh",
+                phase="Phase 1",
+                coverage_status=CoverageStatus.LIVE_VERIFIED if ssi_ready else (CoverageStatus.DELAYED_AVAILABLE if (vnstock_ready or yf_ready) else CoverageStatus.CREDENTIALS_REQUIRED),
+                quote_data_status=DataStatus.LIVE if ssi_ready else DataStatus.DELAYED,
+                historical_data_status=global_hist_status,
+                primary_provider="SSI FastConnect V3 (Live) / Vnstock v6",
+                fallback_provider="yfinance (.VN Educational Historical)",
+                requires_credentials=True, requires_paid_plan_for_live=False,
+                notes="LIVE requires SSI FastConnect V3 credentials ($0 API fee); historical & delayed quotes active via yfinance/Vnstock.",
+            ),
+            ExchangeCoverageEntry(
                 exchange_mic="XLON", exchange_acronym="LSE", exchange_name="London Stock Exchange",
                 region="Europe", country="United Kingdom", currency="GBP", timezone="Europe/London",
                 phase="Phase 7", coverage_status=global_cov_status, quote_data_status=global_quote_status,
                 historical_data_status=global_hist_status,
-                primary_provider="yfinance (.L Educational) / Paid: EODHD",
+                primary_provider="Twelve Data (Live Global)" if self.twelvedata.is_configured() else ("EODHD (Live Global)" if self.eodhd.is_configured() else "yfinance (Delayed)"),
                 fallback_provider="yfinance (.L)", requires_credentials=False, requires_paid_plan_for_live=True,
                 notes="Historical & delayed quotes available via yfinance (.L); real-time requires paid EODHD/Twelve Data.",
             ),
@@ -344,7 +665,7 @@ class MarketDataRegistry:
                 region="Europe", country="Germany", currency="EUR", timezone="Europe/Berlin",
                 phase="Phase 7", coverage_status=global_cov_status, quote_data_status=global_quote_status,
                 historical_data_status=global_hist_status,
-                primary_provider="yfinance (.DE Educational) / Paid: EODHD",
+                primary_provider="Twelve Data (Live Global)" if self.twelvedata.is_configured() else ("EODHD (Live Global)" if self.eodhd.is_configured() else "yfinance (Delayed)"),
                 fallback_provider="yfinance (.DE)", requires_credentials=False, requires_paid_plan_for_live=True,
                 notes="Historical & delayed quotes available via yfinance (.DE); real-time requires paid EODHD/Twelve Data.",
             ),
@@ -353,7 +674,7 @@ class MarketDataRegistry:
                 region="Asia", country="Japan", currency="JPY", timezone="Asia/Tokyo",
                 phase="Phase 7", coverage_status=global_cov_status, quote_data_status=global_quote_status,
                 historical_data_status=global_hist_status,
-                primary_provider="yfinance (.T Educational) / Paid: EODHD",
+                primary_provider="Twelve Data (Live Global)" if self.twelvedata.is_configured() else ("EODHD (Live Global)" if self.eodhd.is_configured() else "yfinance (Delayed)"),
                 fallback_provider="yfinance (.T)", requires_credentials=False, requires_paid_plan_for_live=True,
                 notes="Historical & delayed quotes available via yfinance (.T); real-time requires paid EODHD/Twelve Data.",
             ),
@@ -362,7 +683,7 @@ class MarketDataRegistry:
                 region="Asia", country="Hong Kong", currency="HKD", timezone="Asia/Hong_Kong",
                 phase="Phase 7", coverage_status=global_cov_status, quote_data_status=global_quote_status,
                 historical_data_status=global_hist_status,
-                primary_provider="yfinance (.HK Educational) / Paid: EODHD",
+                primary_provider="Twelve Data (Live Global)" if self.twelvedata.is_configured() else ("EODHD (Live Global)" if self.eodhd.is_configured() else "yfinance (Delayed)"),
                 fallback_provider="yfinance (.HK)", requires_credentials=False, requires_paid_plan_for_live=True,
                 notes="Historical & delayed quotes available via yfinance (.HK); real-time requires paid EODHD/Twelve Data.",
             ),
@@ -371,7 +692,7 @@ class MarketDataRegistry:
                 region="Southeast Asia", country="Singapore", currency="SGD", timezone="Asia/Singapore",
                 phase="Phase 7", coverage_status=global_cov_status, quote_data_status=global_quote_status,
                 historical_data_status=global_hist_status,
-                primary_provider="yfinance (.SI Educational) / Paid: EODHD",
+                primary_provider="Twelve Data (Live Global)" if self.twelvedata.is_configured() else ("EODHD (Live Global)" if self.eodhd.is_configured() else "yfinance (Delayed)"),
                 fallback_provider="yfinance (.SI)", requires_credentials=False, requires_paid_plan_for_live=True,
                 notes="Historical & delayed quotes available via yfinance (.SI); real-time requires paid EODHD/Twelve Data.",
             ),
@@ -380,7 +701,7 @@ class MarketDataRegistry:
                 region="Oceania", country="Australia", currency="AUD", timezone="Australia/Sydney",
                 phase="Phase 7", coverage_status=global_cov_status, quote_data_status=global_quote_status,
                 historical_data_status=global_hist_status,
-                primary_provider="yfinance (.AX Educational) / Paid: EODHD",
+                primary_provider="Twelve Data (Live Global)" if self.twelvedata.is_configured() else ("EODHD (Live Global)" if self.eodhd.is_configured() else "yfinance (Delayed)"),
                 fallback_provider="yfinance (.AX)", requires_credentials=False, requires_paid_plan_for_live=True,
                 notes="Historical & delayed quotes available via yfinance (.AX); real-time requires paid EODHD/Twelve Data.",
             ),

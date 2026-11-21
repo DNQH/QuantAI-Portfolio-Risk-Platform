@@ -1,10 +1,8 @@
-"""ISO 10383 MIC registry and effective-dated exchange/ticker mapping (v1.1.0).
+"""ISO 10383 MIC registry and effective-dated exchange/ticker mapping (v3.0.0).
 
-Covers:
-  - United States: NYSE (XNYS), NASDAQ (XNAS).
-  - Vietnam: Full VN30 + key HOSE (XSTC) and HNX (XHAI -> XSTC effective 2026-12-28) equities.
-  - Global Expansion: Europe (XLON, XETR, XPAR, XSWX, XMIL), Asia (XTKS, XHKG, XKRX),
-    ASEAN (XSES, XKLS, XIDX, XBKK), and Oceania (XASX).
+Includes 10 iconic flagship stocks per major exchange across all 11 GICS sectors:
+  - Technology, Financial Services, Healthcare, Consumer Defensive, Consumer Cyclical,
+    Energy, Industrials, Basic Materials, Utilities, Real Estate, Communication Services.
 """
 
 from __future__ import annotations
@@ -18,6 +16,20 @@ from app.core.models import AssetType, Instrument
 HNX_LAST_TRADING_DATE = date(2026, 12, 23)
 HNX_MIGRATION_SUSPENSION_DATES = frozenset({date(2026, 12, 24), date(2026, 12, 25)})
 HNX_TO_HOSE_EFFECTIVE_DATE = date(2026, 12, 28)
+
+ALL_GICS_SECTORS: Tuple[str, ...] = (
+    "Technology",
+    "Financial Services",
+    "Healthcare",
+    "Consumer Defensive",
+    "Consumer Cyclical",
+    "Energy",
+    "Industrials",
+    "Basic Materials",
+    "Utilities",
+    "Real Estate",
+    "Communication Services",
+)
 
 
 @dataclass(frozen=True)
@@ -38,6 +50,7 @@ MIC_TO_ACRONYM: Dict[str, str] = {
     "XNAS": "NASDAQ",
     "XSTC": "HOSE",
     "XHAI": "HNX",
+    "XUPC": "UPCOM",
     "XLON": "LSE",
     "XETR": "Xetra",
     "XPAR": "Euronext",
@@ -58,6 +71,7 @@ YFINANCE_SUFFIX_BY_MIC: Dict[str, str] = {
     "XNAS": "",
     "XSTC": ".VN",
     "XHAI": ".VN",
+    "XUPC": ".VN",
     "XLON": ".L",
     "XETR": ".DE",
     "XPAR": ".PA",
@@ -74,105 +88,203 @@ YFINANCE_SUFFIX_BY_MIC: Dict[str, str] = {
 }
 
 
-def _vn_hose(ticker: str, name: str, sector: str) -> Instrument:
+def _inst(
+    mic: str, ticker: str, name: str, country: str, ccy: str, sector: str, tz: str,
+    asset_type: AssetType = AssetType.EQUITY, note: Optional[str] = None
+) -> Instrument:
     return Instrument(
-        instrument_id=f"XSTC:{ticker}",
+        instrument_id=f"{mic}:{ticker}",
         ticker=ticker,
-        exchange_mic="XSTC",
-        exchange_acronym="HOSE",
+        exchange_mic=mic,
+        exchange_acronym=MIC_TO_ACRONYM.get(mic, mic),
         company_name=name,
-        country="Vietnam",
-        currency="VND",
+        country=country,
+        currency=ccy,
         sector=sector,
         industry=sector,
-        asset_type=AssetType.EQUITY,
-        timezone="Asia/Ho_Chi_Minh",
+        asset_type=asset_type,
+        timezone=tz,
+        migration_note=note,
     )
+
+
+def _vn_hose(ticker: str, name: str, sector: str) -> Instrument:
+    return _inst("XSTC", ticker, name, "Vietnam", "VND", sector, "Asia/Ho_Chi_Minh")
 
 
 def _vn_hnx(ticker: str, name: str, sector: str) -> Instrument:
-    return Instrument(
-        instrument_id=f"XHAI:{ticker}",
-        ticker=ticker,
-        exchange_mic="XHAI",
-        exchange_acronym="HNX",
-        company_name=name,
-        country="Vietnam",
-        currency="VND",
-        sector=sector,
-        industry=sector,
-        asset_type=AssetType.EQUITY,
-        timezone="Asia/Ho_Chi_Minh",
-        migration_note="Scheduled transfer from HNX (XHAI) to HOSE (XSTC) effective 2026-12-28.",
+    return _inst(
+        "XHAI", ticker, name, "Vietnam", "VND", sector, "Asia/Ho_Chi_Minh",
+        note="Scheduled transfer from HNX (XHAI) to HOSE (XSTC) effective 2026-12-28.",
     )
 
 
+def _vn_upcom(ticker: str, name: str, sector: str) -> Instrument:
+    return _inst("XUPC", ticker, name, "Vietnam", "VND", sector, "Asia/Ho_Chi_Minh")
+
+
 GLOBAL_INSTRUMENTS: List[Instrument] = [
-    # --- United States ---
-    Instrument(instrument_id="XNAS:AAPL", ticker="AAPL", exchange_mic="XNAS", exchange_acronym="NASDAQ", company_name="Apple Inc.", country="United States", currency="USD", sector="Technology", industry="Consumer Electronics", asset_type=AssetType.EQUITY, timezone="America/New_York"),
-    Instrument(instrument_id="XNAS:MSFT", ticker="MSFT", exchange_mic="XNAS", exchange_acronym="NASDAQ", company_name="Microsoft Corporation", country="United States", currency="USD", sector="Technology", industry="Software", asset_type=AssetType.EQUITY, timezone="America/New_York"),
-    Instrument(instrument_id="XNAS:GOOGL", ticker="GOOGL", exchange_mic="XNAS", exchange_acronym="NASDAQ", company_name="Alphabet Inc. Class A", country="United States", currency="USD", sector="Communication Services", industry="Internet Content", asset_type=AssetType.EQUITY, timezone="America/New_York"),
-    Instrument(instrument_id="XNAS:NVDA", ticker="NVDA", exchange_mic="XNAS", exchange_acronym="NASDAQ", company_name="NVIDIA Corporation", country="United States", currency="USD", sector="Technology", industry="Semiconductors", asset_type=AssetType.EQUITY, timezone="America/New_York"),
-    Instrument(instrument_id="XNAS:AMZN", ticker="AMZN", exchange_mic="XNAS", exchange_acronym="NASDAQ", company_name="Amazon.com, Inc.", country="United States", currency="USD", sector="Consumer Cyclical", industry="Internet Retail", asset_type=AssetType.EQUITY, timezone="America/New_York"),
-    Instrument(instrument_id="XNAS:META", ticker="META", exchange_mic="XNAS", exchange_acronym="NASDAQ", company_name="Meta Platforms, Inc.", country="United States", currency="USD", sector="Communication Services", industry="Internet Content", asset_type=AssetType.EQUITY, timezone="America/New_York"),
-    Instrument(instrument_id="XNAS:TSLA", ticker="TSLA", exchange_mic="XNAS", exchange_acronym="NASDAQ", company_name="Tesla, Inc.", country="United States", currency="USD", sector="Consumer Cyclical", industry="Auto Manufacturers", asset_type=AssetType.EQUITY, timezone="America/New_York"),
-    Instrument(instrument_id="XNYS:JPM", ticker="JPM", exchange_mic="XNYS", exchange_acronym="NYSE", company_name="JPMorgan Chase & Co.", country="United States", currency="USD", sector="Financial Services", industry="Banks", asset_type=AssetType.EQUITY, timezone="America/New_York"),
-    Instrument(instrument_id="XNYS:BRK.B", ticker="BRK.B", exchange_mic="XNYS", exchange_acronym="NYSE", company_name="Berkshire Hathaway Inc. Class B", country="United States", currency="USD", sector="Financial Services", industry="Insurance", asset_type=AssetType.EQUITY, timezone="America/New_York"),
-    Instrument(instrument_id="XNYS:SPY", ticker="SPY", exchange_mic="XNYS", exchange_acronym="NYSE", company_name="SPDR S&P 500 ETF Trust", country="United States", currency="USD", sector="Broad Market", industry="ETF", asset_type=AssetType.ETF, timezone="America/New_York"),
-    Instrument(instrument_id="XNYS:VNM", ticker="VNM", exchange_mic="XNYS", exchange_acronym="NYSE", company_name="VanEck Vietnam ETF", country="United States", currency="USD", sector="International Equity", industry="ETF", asset_type=AssetType.ETF, timezone="America/New_York"),
-    # --- Vietnam HOSE (VN30 + Blue Chips) ---
+    # --- United States: NASDAQ (10 Iconic Flagships) ---
+    _inst("XNAS", "AAPL", "Apple Inc.", "United States", "USD", "Technology", "America/New_York"),
+    _inst("XNAS", "MSFT", "Microsoft Corporation", "United States", "USD", "Technology", "America/New_York"),
+    _inst("XNAS", "NVDA", "NVIDIA Corporation", "United States", "USD", "Technology", "America/New_York"),
+    _inst("XNAS", "AMZN", "Amazon.com, Inc.", "United States", "USD", "Consumer Cyclical", "America/New_York"),
+    _inst("XNAS", "GOOGL", "Alphabet Inc. Class A", "United States", "USD", "Communication Services", "America/New_York"),
+    _inst("XNAS", "META", "Meta Platforms, Inc.", "United States", "USD", "Communication Services", "America/New_York"),
+    _inst("XNAS", "TSLA", "Tesla, Inc.", "United States", "USD", "Consumer Cyclical", "America/New_York"),
+    _inst("XNAS", "AVGO", "Broadcom Inc.", "United States", "USD", "Technology", "America/New_York"),
+    _inst("XNAS", "COST", "Costco Wholesale Corporation", "United States", "USD", "Consumer Defensive", "America/New_York"),
+    _inst("XNAS", "NFLX", "Netflix, Inc.", "United States", "USD", "Communication Services", "America/New_York"),
+    # --- United States: NYSE (10 Iconic Flagships + ETFs) ---
+    _inst("XNYS", "JPM", "JPMorgan Chase & Co.", "United States", "USD", "Financial Services", "America/New_York"),
+    _inst("XNYS", "BRK.B", "Berkshire Hathaway Inc. Class B", "United States", "USD", "Financial Services", "America/New_York"),
+    _inst("XNYS", "JNJ", "Johnson & Johnson", "United States", "USD", "Healthcare", "America/New_York"),
+    _inst("XNYS", "XOM", "Exxon Mobil Corporation", "United States", "USD", "Energy", "America/New_York"),
+    _inst("XNYS", "WMT", "Walmart Inc.", "United States", "USD", "Consumer Defensive", "America/New_York"),
+    _inst("XNYS", "V", "Visa Inc.", "United States", "USD", "Financial Services", "America/New_York"),
+    _inst("XNYS", "UNH", "UnitedHealth Group Incorporated", "United States", "USD", "Healthcare", "America/New_York"),
+    _inst("XNYS", "CAT", "Caterpillar Inc.", "United States", "USD", "Industrials", "America/New_York"),
+    _inst("XNYS", "NEE", "NextEra Energy, Inc.", "United States", "USD", "Utilities", "America/New_York"),
+    _inst("XNYS", "PLD", "Prologis, Inc.", "United States", "USD", "Real Estate", "America/New_York"),
+    _inst("XNYS", "LIN", "Linde plc", "United States", "USD", "Basic Materials", "America/New_York"),
+    _inst("XNYS", "SPY", "SPDR S&P 500 ETF Trust", "United States", "USD", "Broad Market", "America/New_York", AssetType.ETF),
+    _inst("XNYS", "VNM", "VanEck Vietnam ETF", "United States", "USD", "International Equity", "America/New_York", AssetType.ETF),
+
+    # --- Vietnam: HOSE (Top 10 Iconic + Full VN30) ---
     _vn_hose("FPT", "FPT Corporation", "Technology"),
+    _vn_hose("VCB", "Vietcombank", "Financial Services"),
     _vn_hose("VNM", "Vietnam Dairy Products JSC (Vinamilk)", "Consumer Defensive"),
     _vn_hose("HPG", "Hoa Phat Group JSC", "Basic Materials"),
-    _vn_hose("VCB", "Vietcombank (Joint Stock Commercial Bank for Foreign Trade)", "Financial Services"),
+    _vn_hose("TCB", "Techcombank", "Financial Services"),
+    _vn_hose("MWG", "Mobile World Investment Corp", "Consumer Cyclical"),
+    _vn_hose("GAS", "PetroVietnam Gas JSC (PV GAS)", "Energy"),
     _vn_hose("VIC", "Vingroup JSC", "Real Estate"),
+    _vn_hose("REE", "Refrigeration Electrical Engineering Corp", "Industrials"),
+    _vn_hose("POW", "PetroVietnam Power Corporation", "Utilities"),
     _vn_hose("VHM", "Vinhomes JSC", "Real Estate"),
     _vn_hose("VRE", "Vincom Retail JSC", "Real Estate"),
-    _vn_hose("TCB", "Techcombank (Vietnam Technological & Commercial JSB)", "Financial Services"),
-    _vn_hose("MBB", "Military Commercial Joint Stock Bank (MBBank)", "Financial Services"),
-    _vn_hose("ACB", "Asia Commercial Joint Stock Bank", "Financial Services"),
-    _vn_hose("CTG", "VietinBank (Vietnam JS Commercial Bank for Industry & Trade)", "Financial Services"),
-    _vn_hose("BID", "BIDV (Bank for Investment and Development of Vietnam)", "Financial Services"),
-    _vn_hose("VPB", "VPBank (Vietnam Prosperity JS Commercial Bank)", "Financial Services"),
-    _vn_hose("STB", "Sacombank (Saigon Thuong Tin Commercial JSB)", "Financial Services"),
-    _vn_hose("HDB", "HDBank (Ho Chi Minh City Development JSB)", "Financial Services"),
+    _vn_hose("MBB", "MBBank", "Financial Services"),
+    _vn_hose("ACB", "Asia Commercial JSB", "Financial Services"),
+    _vn_hose("CTG", "VietinBank", "Financial Services"),
+    _vn_hose("BID", "BIDV", "Financial Services"),
+    _vn_hose("VPB", "VPBank", "Financial Services"),
+    _vn_hose("STB", "Sacombank", "Financial Services"),
+    _vn_hose("HDB", "HDBank", "Financial Services"),
     _vn_hose("SSI", "SSI Securities Corporation", "Financial Services"),
-    _vn_hose("VND", "VNDIRECT Securities Corporation", "Financial Services"),
-    _vn_hose("HCM", "Ho Chi Minh City Securities Corporation (HSC)", "Financial Services"),
-    _vn_hose("MWG", "Mobile World Investment Corporation", "Consumer Cyclical"),
     _vn_hose("MSN", "Masan Group Corporation", "Consumer Defensive"),
-    _vn_hose("GAS", "PetroVietnam Gas JSC (PV GAS)", "Energy"),
-    _vn_hose("SAB", "Sabeco (Saigon Beer - Alcohol - Beverage Corp)", "Consumer Defensive"),
-    _vn_hose("PLX", "Vietnam National Petroleum Group (Petrolimex)", "Energy"),
-    _vn_hose("POW", "PetroVietnam Power Corporation", "Utilities"),
+    _vn_hose("SAB", "Sabeco", "Consumer Defensive"),
+    _vn_hose("PLX", "Petrolimex", "Energy"),
+    _vn_hose("DGC", "Duc Giang Chemicals Group JSC", "Basic Materials"),
+    _vn_hose("DHG", "DHG Pharmaceutical JSC", "Healthcare"),
+    _vn_hose("PNJ", "Phu Nhuan Jewelry JSC", "Consumer Cyclical"),
     _vn_hose("GVR", "Vietnam Rubber Group JSC", "Basic Materials"),
     _vn_hose("BCM", "Becamex IDC Corporation", "Real Estate"),
     _vn_hose("BVH", "Bao Viet Holdings", "Financial Services"),
-    _vn_hose("PNJ", "Phu Nhuan Jewelry JSC", "Consumer Cyclical"),
-    _vn_hose("REE", "Refrigeration Electrical Engineering Corp", "Industrials"),
-    _vn_hose("DGC", "Duc Giang Chemicals Group JSC", "Basic Materials"),
-    # --- Vietnam HNX (Scheduled transfer to HOSE 2026-12-28) ---
+    _vn_hose("VCI", "Vietcap Securities JSC", "Financial Services"),
+
+    # --- Vietnam: HNX (10 Iconic) ---
     _vn_hnx("SHS", "Saigon - Hanoi Securities JSC", "Financial Services"),
-    _vn_hnx("PVS", "PetroVietnam Technical Services Corporation", "Energy"),
+    _vn_hnx("PVS", "PetroVietnam Technical Services Corp", "Energy"),
     _vn_hnx("IDC", "IDICO Corporation - JSC", "Industrials"),
     _vn_hnx("CEO", "C.E.O Group JSC", "Real Estate"),
     _vn_hnx("MBS", "MB Securities JSC", "Financial Services"),
     _vn_hnx("NTP", "Tien Phong Plastic JSC", "Basic Materials"),
     _vn_hnx("VCS", "Vicostone JSC", "Basic Materials"),
-    # --- Europe ---
-    Instrument(instrument_id="XLON:HSBA", ticker="HSBA", exchange_mic="XLON", exchange_acronym="LSE", company_name="HSBC Holdings plc", country="United Kingdom", currency="GBP", sector="Financial Services", industry="Banks", asset_type=AssetType.EQUITY, timezone="Europe/London"),
-    Instrument(instrument_id="XETR:SAP", ticker="SAP", exchange_mic="XETR", exchange_acronym="Xetra", company_name="SAP SE", country="Germany", currency="EUR", sector="Technology", industry="Software", asset_type=AssetType.EQUITY, timezone="Europe/Berlin"),
-    Instrument(instrument_id="XPAR:MC", ticker="MC", exchange_mic="XPAR", exchange_acronym="Euronext", company_name="LVMH Moet Hennessy Louis Vuitton SE", country="France", currency="EUR", sector="Consumer Cyclical", industry="Luxury Goods", asset_type=AssetType.EQUITY, timezone="Europe/Paris"),
-    Instrument(instrument_id="XSWX:NESN", ticker="NESN", exchange_mic="XSWX", exchange_acronym="SIX", company_name="Nestle S.A.", country="Switzerland", currency="CHF", sector="Consumer Defensive", industry="Packaged Foods", asset_type=AssetType.EQUITY, timezone="Europe/Zurich"),
-    Instrument(instrument_id="XMIL:ENEL", ticker="ENEL", exchange_mic="XMIL", exchange_acronym="Borsa Italiana", company_name="Enel S.p.A.", country="Italy", currency="EUR", sector="Utilities", industry="Utilities", asset_type=AssetType.EQUITY, timezone="Europe/Rome"),
-    # --- Asia, ASEAN & Oceania ---
-    Instrument(instrument_id="XTKS:7203", ticker="7203", exchange_mic="XTKS", exchange_acronym="TSE", company_name="Toyota Motor Corporation", country="Japan", currency="JPY", sector="Consumer Cyclical", industry="Auto Manufacturers", asset_type=AssetType.EQUITY, timezone="Asia/Tokyo"),
-    Instrument(instrument_id="XHKG:0700", ticker="0700", exchange_mic="XHKG", exchange_acronym="HKEX", company_name="Tencent Holdings Limited", country="Hong Kong", currency="HKD", sector="Communication Services", industry="Internet Content", asset_type=AssetType.EQUITY, timezone="Asia/Hong_Kong"),
-    Instrument(instrument_id="XKRX:005930", ticker="005930", exchange_mic="XKRX", exchange_acronym="KRX", company_name="Samsung Electronics Co., Ltd.", country="South Korea", currency="KRW", sector="Technology", industry="Semiconductors", asset_type=AssetType.EQUITY, timezone="Asia/Seoul"),
-    Instrument(instrument_id="XSES:D05", ticker="D05", exchange_mic="XSES", exchange_acronym="SGX", company_name="DBS Group Holdings Ltd", country="Singapore", currency="SGD", sector="Financial Services", industry="Banks", asset_type=AssetType.EQUITY, timezone="Asia/Singapore"),
-    Instrument(instrument_id="XIDX:BBCA", ticker="BBCA", exchange_mic="XIDX", exchange_acronym="IDX", company_name="PT Bank Central Asia Tbk", country="Indonesia", currency="IDR", sector="Financial Services", industry="Banks", asset_type=AssetType.EQUITY, timezone="Asia/Jakarta"),
-    Instrument(instrument_id="XBKK:PTT", ticker="PTT", exchange_mic="XBKK", exchange_acronym="SET", company_name="PTT Public Company Limited", country="Thailand", currency="THB", sector="Energy", industry="Oil & Gas", asset_type=AssetType.EQUITY, timezone="Asia/Bangkok"),
-    Instrument(instrument_id="XASX:BHP", ticker="BHP", exchange_mic="XASX", exchange_acronym="ASX", company_name="BHP Group Limited", country="Australia", currency="AUD", sector="Basic Materials", industry="Metals & Mining", asset_type=AssetType.EQUITY, timezone="Australia/Sydney"),
+    _vn_hnx("HUT", "Tasco JSC", "Industrials"),
+    _vn_hnx("TNG", "TNG Investment and Trading JSC", "Consumer Cyclical"),
+    _vn_hnx("LAS", "Lam Thao Fertilizers & Chemicals JSC", "Basic Materials"),
+
+    # --- Vietnam: UPCOM (10 Iconic) ---
+    _vn_upcom("ACV", "Airports Corporation of Vietnam JSC", "Industrials"),
+    _vn_upcom("MCH", "Masan Consumer Corporation", "Consumer Defensive"),
+    _vn_upcom("VEA", "Vietnam Engine & Agricultural Machinery", "Industrials"),
+    _vn_upcom("QNS", "Quang Ngai Sugar JSC", "Consumer Defensive"),
+    _vn_upcom("FOX", "FPT Telecom JSC", "Communication Services"),
+    _vn_upcom("VGI", "Viettel Global Investment JSC", "Communication Services"),
+    _vn_upcom("BSR", "Binh Son Refining & Petrochemical JSC", "Energy"),
+    _vn_upcom("OIL", "PetroVietnam Oil Corporation (PVOIL)", "Energy"),
+    _vn_upcom("MVN", "Vietnam Maritime Corporation (VIMC)", "Industrials"),
+    _vn_upcom("PHP", "Port of Hai Phong JSC", "Industrials"),
+
+    # --- United Kingdom: LSE (10 Iconic) ---
+    _inst("XLON", "HSBA", "HSBC Holdings plc", "United Kingdom", "GBP", "Financial Services", "Europe/London"),
+    _inst("XLON", "SHEL", "Shell plc", "United Kingdom", "GBP", "Energy", "Europe/London"),
+    _inst("XLON", "AZN", "AstraZeneca PLC", "United Kingdom", "GBP", "Healthcare", "Europe/London"),
+    _inst("XLON", "ULVR", "Unilever PLC", "United Kingdom", "GBP", "Consumer Defensive", "Europe/London"),
+    _inst("XLON", "BP", "BP p.l.c.", "United Kingdom", "GBP", "Energy", "Europe/London"),
+    _inst("XLON", "GSK", "GSK plc", "United Kingdom", "GBP", "Healthcare", "Europe/London"),
+    _inst("XLON", "RIO", "Rio Tinto Group", "United Kingdom", "GBP", "Basic Materials", "Europe/London"),
+    _inst("XLON", "DGE", "Diageo plc", "United Kingdom", "GBP", "Consumer Defensive", "Europe/London"),
+    _inst("XLON", "BARC", "Barclays PLC", "United Kingdom", "GBP", "Financial Services", "Europe/London"),
+    _inst("XLON", "NG", "National Grid plc", "United Kingdom", "GBP", "Utilities", "Europe/London"),
+
+    # --- Germany: Xetra (10 Iconic) ---
+    _inst("XETR", "SAP", "SAP SE", "Germany", "EUR", "Technology", "Europe/Berlin"),
+    _inst("XETR", "SIE", "Siemens AG", "Germany", "EUR", "Industrials", "Europe/Berlin"),
+    _inst("XETR", "ALV", "Allianz SE", "Germany", "EUR", "Financial Services", "Europe/Berlin"),
+    _inst("XETR", "DTE", "Deutsche Telekom AG", "Germany", "EUR", "Communication Services", "Europe/Berlin"),
+    _inst("XETR", "MBG", "Mercedes-Benz Group AG", "Germany", "EUR", "Consumer Cyclical", "Europe/Berlin"),
+    _inst("XETR", "BMW", "Bayerische Motoren Werke AG", "Germany", "EUR", "Consumer Cyclical", "Europe/Berlin"),
+    _inst("XETR", "BAS", "BASF SE", "Germany", "EUR", "Basic Materials", "Europe/Berlin"),
+    _inst("XETR", "ADS", "adidas AG", "Germany", "EUR", "Consumer Cyclical", "Europe/Berlin"),
+    _inst("XETR", "MUV2", "Munich Re", "Germany", "EUR", "Financial Services", "Europe/Berlin"),
+    _inst("XETR", "IFX", "Infineon Technologies AG", "Germany", "EUR", "Technology", "Europe/Berlin"),
+
+    # --- Japan: TSE (10 Iconic) ---
+    _inst("XTKS", "7203", "Toyota Motor Corporation", "Japan", "JPY", "Consumer Cyclical", "Asia/Tokyo"),
+    _inst("XTKS", "6758", "Sony Group Corporation", "Japan", "JPY", "Technology", "Asia/Tokyo"),
+    _inst("XTKS", "9984", "SoftBank Group Corp.", "Japan", "JPY", "Communication Services", "Asia/Tokyo"),
+    _inst("XTKS", "8306", "Mitsubishi UFJ Financial Group", "Japan", "JPY", "Financial Services", "Asia/Tokyo"),
+    _inst("XTKS", "6861", "Keyence Corporation", "Japan", "JPY", "Technology", "Asia/Tokyo"),
+    _inst("XTKS", "7974", "Nintendo Co., Ltd.", "Japan", "JPY", "Communication Services", "Asia/Tokyo"),
+    _inst("XTKS", "9432", "Nippon Telegraph and Telephone", "Japan", "JPY", "Communication Services", "Asia/Tokyo"),
+    _inst("XTKS", "8035", "Tokyo Electron Limited", "Japan", "JPY", "Technology", "Asia/Tokyo"),
+    _inst("XTKS", "4502", "Takeda Pharmaceutical Company", "Japan", "JPY", "Healthcare", "Asia/Tokyo"),
+    _inst("XTKS", "6501", "Hitachi, Ltd.", "Japan", "JPY", "Industrials", "Asia/Tokyo"),
+
+    # --- Hong Kong: HKEX (10 Iconic) ---
+    _inst("XHKG", "0700", "Tencent Holdings Limited", "Hong Kong", "HKD", "Communication Services", "Asia/Hong_Kong"),
+    _inst("XHKG", "9988", "Alibaba Group Holding Limited", "Hong Kong", "HKD", "Consumer Cyclical", "Asia/Hong_Kong"),
+    _inst("XHKG", "3690", "Meituan", "Hong Kong", "HKD", "Consumer Cyclical", "Asia/Hong_Kong"),
+    _inst("XHKG", "0939", "China Construction Bank Corp", "Hong Kong", "HKD", "Financial Services", "Asia/Hong_Kong"),
+    _inst("XHKG", "1299", "AIA Group Limited", "Hong Kong", "HKD", "Financial Services", "Asia/Hong_Kong"),
+    _inst("XHKG", "0005", "HSBC Holdings plc (HK)", "Hong Kong", "HKD", "Financial Services", "Asia/Hong_Kong"),
+    _inst("XHKG", "0941", "China Mobile Limited", "Hong Kong", "HKD", "Communication Services", "Asia/Hong_Kong"),
+    _inst("XHKG", "1211", "BYD Company Limited", "Hong Kong", "HKD", "Consumer Cyclical", "Asia/Hong_Kong"),
+    _inst("XHKG", "0388", "Hong Kong Exchanges and Clearing", "Hong Kong", "HKD", "Financial Services", "Asia/Hong_Kong"),
+    _inst("XHKG", "0883", "CNOOC Limited", "Hong Kong", "HKD", "Energy", "Asia/Hong_Kong"),
+
+    # --- Singapore: SGX (10 Iconic) ---
+    _inst("XSES", "D05", "DBS Group Holdings Ltd", "Singapore", "SGD", "Financial Services", "Asia/Singapore"),
+    _inst("XSES", "O39", "Oversea-Chinese Banking Corp", "Singapore", "SGD", "Financial Services", "Asia/Singapore"),
+    _inst("XSES", "U11", "United Overseas Bank Limited", "Singapore", "SGD", "Financial Services", "Asia/Singapore"),
+    _inst("XSES", "Z74", "Singapore Telecommunications", "Singapore", "SGD", "Communication Services", "Asia/Singapore"),
+    _inst("XSES", "C6L", "Singapore Airlines Limited", "Singapore", "SGD", "Industrials", "Asia/Singapore"),
+    _inst("XSES", "BN4", "Keppel Ltd.", "Singapore", "SGD", "Industrials", "Asia/Singapore"),
+    _inst("XSES", "F34", "Wilmar International Limited", "Singapore", "SGD", "Consumer Defensive", "Asia/Singapore"),
+    _inst("XSES", "C38U", "CapitaLand Integrated Commercial Trust", "Singapore", "SGD", "Real Estate", "Asia/Singapore"),
+    _inst("XSES", "A17U", "CapitaLand Ascendas REIT", "Singapore", "SGD", "Real Estate", "Asia/Singapore"),
+    _inst("XSES", "S68", "Singapore Exchange Limited", "Singapore", "SGD", "Financial Services", "Asia/Singapore"),
+
+    # --- Australia: ASX (10 Iconic) ---
+    _inst("XASX", "BHP", "BHP Group Limited", "Australia", "AUD", "Basic Materials", "Australia/Sydney"),
+    _inst("XASX", "CBA", "Commonwealth Bank of Australia", "Australia", "AUD", "Financial Services", "Australia/Sydney"),
+    _inst("XASX", "CSL", "CSL Limited", "Australia", "AUD", "Healthcare", "Australia/Sydney"),
+    _inst("XASX", "NAB", "National Australia Bank", "Australia", "AUD", "Financial Services", "Australia/Sydney"),
+    _inst("XASX", "WBC", "Westpac Banking Corporation", "Australia", "AUD", "Financial Services", "Australia/Sydney"),
+    _inst("XASX", "ANZ", "ANZ Group Holdings Limited", "Australia", "AUD", "Financial Services", "Australia/Sydney"),
+    _inst("XASX", "FMG", "Fortescue Ltd", "Australia", "AUD", "Basic Materials", "Australia/Sydney"),
+    _inst("XASX", "WDS", "Woodside Energy Group Ltd", "Australia", "AUD", "Energy", "Australia/Sydney"),
+    _inst("XASX", "WES", "Wesfarmers Limited", "Australia", "AUD", "Consumer Cyclical", "Australia/Sydney"),
+    _inst("XASX", "MQG", "Macquarie Group Limited", "Australia", "AUD", "Financial Services", "Australia/Sydney"),
+
+    # --- Additional Europe & Asia ---
+    _inst("XPAR", "MC", "LVMH Moet Hennessy Louis Vuitton", "France", "EUR", "Consumer Cyclical", "Europe/Paris"),
+    _inst("XSWX", "NESN", "Nestle S.A.", "Switzerland", "CHF", "Consumer Defensive", "Europe/Zurich"),
+    _inst("XMIL", "ENEL", "Enel S.p.A.", "Italy", "EUR", "Utilities", "Europe/Rome"),
+    _inst("XKRX", "005930", "Samsung Electronics Co., Ltd.", "South Korea", "KRW", "Technology", "Asia/Seoul"),
+    _inst("XIDX", "BBCA", "PT Bank Central Asia Tbk", "Indonesia", "IDR", "Financial Services", "Asia/Jakarta"),
+    _inst("XBKK", "PTT", "PTT Public Company Limited", "Thailand", "THB", "Energy", "Asia/Bangkok"),
 ]
 
 PHASE1_INSTRUMENTS = GLOBAL_INSTRUMENTS
@@ -265,36 +377,25 @@ def search_seed_instruments(
 
     results: List[Instrument] = []
     for inst in GLOBAL_INSTRUMENTS:
-        eff_mic, eff_acronym, _, eff_note = resolve_effective_exchange(
+        eff_mic, eff_acronym, _, note = resolve_effective_exchange(
             inst.ticker, inst.exchange_mic, as_of=as_of
         )
         effective_inst = inst.copy(
             update={
+                "instrument_id": f"{eff_mic}:{inst.ticker}",
                 "exchange_mic": eff_mic,
                 "exchange_acronym": eff_acronym,
-                "instrument_id": f"{eff_mic}:{inst.ticker}",
-                "migration_note": eff_note or inst.migration_note,
+                "migration_note": note or inst.migration_note,
             }
         )
-        if ex_filter and ex_filter not in {effective_inst.exchange_mic, effective_inst.exchange_acronym.upper()}:
+        if ex_filter and effective_inst.exchange_mic != ex_filter and effective_inst.exchange_acronym.upper() != ex_filter:
             continue
         if country_filter and country_filter not in effective_inst.country.lower():
             continue
-        if sector_filter and sector_filter not in effective_inst.sector.lower():
+        if sector_filter and (not effective_inst.sector or sector_filter not in effective_inst.sector.lower()):
             continue
         if q:
-            haystack = " ".join(
-                [
-                    effective_inst.instrument_id,
-                    effective_inst.ticker,
-                    effective_inst.company_name,
-                    effective_inst.exchange_mic,
-                    effective_inst.exchange_acronym,
-                    effective_inst.country,
-                    effective_inst.sector,
-                    effective_inst.industry,
-                ]
-            ).lower()
+            haystack = f"{effective_inst.ticker} {effective_inst.instrument_id} {effective_inst.company_name} {effective_inst.sector or ''}".lower()
             if q not in haystack:
                 continue
         results.append(effective_inst)

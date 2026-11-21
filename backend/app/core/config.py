@@ -14,18 +14,25 @@ from typing import Optional
 
 def _load_env_files() -> None:
     try:
-        from dotenv import load_dotenv
+        from dotenv import dotenv_values
     except ImportError:
         return
 
     candidates = [
         Path(__file__).resolve().parents[3] / ".env",
-        Path.cwd() / ".env",
         Path.cwd().parent / ".env",
+        Path.cwd() / ".env",
     ]
+    seen = set()
     for path in candidates:
-        if path.is_file():
-            load_dotenv(path, override=True)
+        resolved = path.resolve()
+        if resolved in seen or not path.is_file():
+            continue
+        seen.add(resolved)
+        vals = dotenv_values(path)
+        for k, v in vals.items():
+            if v is not None and str(v).strip() != "":
+                os.environ[k] = str(v).strip()
 
 
 _load_env_files()
@@ -67,7 +74,7 @@ class Settings:
     )
 
     gemini_api_key: Optional[str] = field(default_factory=lambda: (os.getenv("GEMINI_API_KEY") or "").strip() or None)
-    gemini_model: str = field(default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-2.5-flash"))
+    gemini_model: str = field(default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite"))
 
     eodhd_api_key: Optional[str] = field(default_factory=lambda: (os.getenv("EODHD_API_KEY") or "").strip() or None)
     twelvedata_api_key: Optional[str] = field(default_factory=lambda: (os.getenv("TWELVEDATA_API_KEY") or "").strip() or None)

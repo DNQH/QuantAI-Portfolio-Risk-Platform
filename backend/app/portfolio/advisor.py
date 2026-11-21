@@ -52,11 +52,19 @@ class MarketBlueprintResponse(BaseModel):
     sectors: List[SectorStockGroup]
 
 
+class ChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1, max_length=4000)
+
+
 class DiverseRiskAdvisorRequest(BaseModel):
-    question: str = Field(..., min_length=2, max_length=1000)
-    analysis: DiverseRiskResponse
+    question: str = Field(..., min_length=1, max_length=1500)
+    analysis: Optional[DiverseRiskResponse] = None
     market_scope: Optional[str] = None
     selected_sectors: List[str] = Field(default_factory=list)
+    selected_stocks: List[str] = Field(default_factory=list)
+    portfolio_summary: Optional[str] = None
+    conversation_history: List[ChatTurn] = Field(default_factory=list)
 
 
 class DiverseRiskAdvisorResponse(BaseModel):
@@ -232,19 +240,166 @@ def _build_question_aware_analysis(
     return "\n\n".join(paragraphs), actions
 
 
+
+def _build_standalone_conversational_reply(
+    question: str,
+    active_symbols: List[str],
+    sector_breakdown: Dict[str, float],
+    missing_sectors: List[str],
+    market_scope: Optional[str],
+    portfolio_summary: Optional[str],
+) -> tuple[str, List[str]]:
+    q = question.strip().lower()
+    clean_syms = [s.split(":", 1)[1] if ":" in s else s for s in active_symbols]
+    basket_str = ", ".join(clean_syms) if clean_syms else "your portfolio"
+    is_vn_focus = (
+        any(tok in q for tok in ("vietnam", "vietnamese", "vn30", "hose", "hnx", "upcom", "việt nam"))
+        or (market_scope and "vietnam" in market_scope.lower() and "united states" not in market_scope.lower())
+        or (active_symbols and all(s.startswith(("XSTC:", "XHAI:", "XUPC:")) for s in active_symbols))
+    )
+
+    # 1. Natural greetings & casual check-ins
+    greeting_tokens = ("hi", "hello", "hey", "good morning", "good afternoon", "good evening", "chào", "xin chào", "alo")
+    if len(q.split()) <= 5 and any(q == g or q.startswith(g + " ") or q.startswith(g + "!") or q.startswith(g + ",") for g in greeting_tokens):
+        greeting_lead = "Good morning!" if "morning" in q else ("Chào bạn!" if ("chào" in q or "alo" in q) else "Hi there!")
+        if clean_syms:
+            return (
+                f"{greeting_lead} I'm looking at your current {len(clean_syms)}-stock basket ({basket_str}). "
+                f"What would you like to explore today — trimming high-volatility names, adding defensive sectors, or stress-testing a specific scenario?",
+                [],
+            )
+        return (
+            f"{greeting_lead} I'm ready to help you design a low-risk portfolio. Tell me which markets, capital size, or risk goals you have in mind.",
+            [],
+        )
+
+    # Identify high-beta / cyclical candidates inside current basket to trim/remove
+    high_beta_sectors = {"Real Estate", "Consumer Cyclical", "Financial Services", "Industrials"}
+    from app.core.symbology import GLOBAL_INSTRUMENTS
+    meta_by_id = {i.instrument_id.upper(): i for i in GLOBAL_INSTRUMENTS}
+    meta_by_tkr = {i.ticker.upper(): i for i in GLOBAL_INSTRUMENTS}
+
+    cyclical_in_basket: List[str] = []
+    defensive_in_basket: List[str] = []
+    for s in active_symbols:
+        tkr = s.split(":", 1)[1] if ":" in s else s
+        inst = meta_by_id.get(s.upper()) or meta_by_tkr.get(tkr.upper())
+        sec = inst.sector if inst else None
+        if sec in {"Healthcare", "Consumer Defensive", "Utilities"}:
+            defensive_in_basket.append(f"{tkr} ({sec})")
+        elif sec in high_beta_sectors or tkr in {"CEO", "SSI", "HUT", "TSLA", "NVDA"}:
+            cyclical_in_basket.append(f"{tkr} ({sec or 'Cyclical'})")
+
+    # Market-appropriate defensive additions not already in basket
+    add_candidates = (
+        [
+            ("Consumer Defensive", "VNM or MCH"),
+            ("Utilities", "POW or GAS"),
+            ("Financial Services (Low-Beta Bank)", "VCB or ACB"),
+            ("Healthcare", "DHG"),
+        ]
+        if is_vn_focus
+        else [
+            ("Healthcare", "JNJ or UNH"),
+            ("Consumer Defensive", "WMT or COST"),
+            ("Utilities", "NEE"),
+            ("Energy", "XOM"),
+        ]
+    )
+    suggested_adds = [
+        f"{sec}: {tkrs}"
+        for sec, tkrs in add_candidates
+        if not any(t.strip() in clean_syms for t in tkrs.replace(" or ", ",").split(","))
+    ][:3]
+
+    # 2. Add / Remove / Trim / Replace stock questions
+    if any(k in q for k in ("add", "remove", "drop", "trim", "cut", "sell", "buy", "replace", "swap", "thêm", "bỏ", "xóa", "thay")):
+        trim_part = (
+            f"Candidates to trim or remove first: {', '.join(cyclical_in_basket[:3])}. "
+            f"These names carry higher beta and cyclical drawdown sensitivity, which disproportionately expands tail risk during market sell-offs."
+            if cyclical_in_basket
+            else f"Your current basket ({basket_str}) has no extreme single-sector overlap, so trim whichever holding exceeds 20–25% weight."
+        )
+        add_part = (
+            f"Best additions to lower portfolio volatility: {'; '.join(suggested_adds)}."
+            if suggested_adds
+            else "Your defensive sector coverage is already solid; consider adding a cross-market hedge from another country to reduce domestic macro risk."
+        )
+        keep_part = (
+            f"Core defensive anchors worth keeping: {', '.join(defensive_in_basket[:3])}."
+            if defensive_in_basket
+            else "You currently lack dedicated Healthcare/Consumer Defensive/Utilities anchors."
+        )
+        return (
+            f"{trim_part}\n\n{add_part}\n\n{keep_part}",
+            [f"Trim cyclical overlap ({', '.join(cyclical_in_basket[:2])})" if cyclical_in_basket else "Rebalance weights quarterly", add_part],
+        )
+
+    # 3. Interest rate / inflation / macro hedge questions
+    if any(k in q for k in ("rate", "inflation", "fed", "macro", "recession", "crash", "hedge", "lãi suất", "lạm phát", "khủng hoảng")):
+        sec_list = ", ".join(f"{k} ({v:.0f}%)" for k, v in list(sector_breakdown.items())[:4]) or "your current sectors"
+        hedge_picks = "GAS/BSR (Energy) and VCB/MBB (Banks) paired with VNM/DHG (Defensive)" if is_vn_focus else "XOM (Energy), JPM (Financials), and JNJ/WMT (Defensive Cash Flow)"
+        return (
+            f"To hedge rising interest rates and inflation across {basket_str} (current mix: {sec_list}), reduce exposure to rate-sensitive Real Estate and long-duration growth names, "
+            f"and tilt 25–35% toward cash-generative inflation beneficiaries such as {hedge_picks}. "
+            f"Keep single-stock weights capped near 15–20% and rebalance quarterly to lock in gains during rate spikes.",
+            ["Reduce Real Estate / high-duration exposure", f"Add inflation-resilient anchors: {hedge_picks}"],
+        )
+
+    # 4. Sector / correlation / diversification questions
+    if any(k in q for k in ("sector", "industry", "correlat", "defensive", "diversif", "ngành", "tương quan")):
+        sec_str = ", ".join(f"{k}: {v:.0f}%" for k, v in sector_breakdown.items()) if sector_breakdown else "unclassified"
+        miss_str = ", ".join(missing_sectors) if missing_sectors else "none (core defensive sectors are covered)"
+        return (
+            f"Your current sector exposure across {len(clean_syms)} stocks is: {sec_str}.\n\n"
+            f"Missing defensive sectors: {miss_str}. Adding low-correlation holdings in {'; '.join(suggested_adds) if suggested_adds else 'cross-market defensive leaders'} "
+            f"typically cuts portfolio drawdown more effectively than adding another stock inside an already-crowded sector.",
+            [f"Fill missing defensive sectors: {miss_str}"],
+        )
+
+    # 5. General / non-portfolio casual message when Gemini is temporarily unavailable (503)
+    finance_keywords = ("stock", "portfolio", "risk", "weight", "return", "drawdown", "volatil", "market", "invest", "buy", "sell", "cổ phiếu", "danh mục", "rủi ro", "đầu tư", "tỷ trọng", "lợi nhuận")
+    if not any(k in q for k in finance_keywords):
+        return (
+            "Gemini is briefly experiencing a temporary high-demand spike right now, so my full conversational mode couldn't connect on that turn. "
+            "Hit Send again in a couple of seconds and I'll be right with you!",
+            [],
+        )
+
+    sec_str = ", ".join(f"{k} ({v:.0f}%)" for k, v in list(sector_breakdown.items())[:4]) if sector_breakdown else "mixed sectors"
+    return (
+        f"Looking at your {len(clean_syms)}-stock basket ({basket_str} — {sec_str}), the fastest way to improve risk-adjusted returns is to pair your growth/cyclical names "
+        f"with uncorrelated defensive cash-flow anchors ({'; '.join(suggested_adds) if suggested_adds else 'Healthcare, Consumer Defensive & Utilities'}) "
+        f"and keep individual weights balanced under 20–25%. Ask me specifically about any ticker to add, remove, or stress-test!",
+        [f"Consider adding: {'; '.join(suggested_adds)}" if suggested_adds else "Maintain quarterly rebalancing"],
+    )
+
+
 def ask_diverse_risk_advisor(
     req: DiverseRiskAdvisorRequest,
     gemini_api_key: Optional[str] = None,
-    gemini_model: str = "gemini-2.5-flash",
+    gemini_model: str = "gemini-3.1-flash-lite",
     timeout: float = 20.0,
     http_post: Optional[Callable[..., Any]] = None,
 ) -> DiverseRiskAdvisorResponse:
-    sector_breakdown, country_breakdown = _lookup_metadata(req.analysis.symbols)
+    active_symbols = req.analysis.symbols if req.analysis is not None else req.selected_stocks
+    sector_breakdown, country_breakdown = _lookup_metadata(active_symbols)
     missing_sectors = [s for s in DEFENSIVE_CORE_SECTORS if s not in sector_breakdown]
 
-    det_answer, actions = _build_question_aware_analysis(
-        req.question, req.analysis, sector_breakdown, missing_sectors, req.market_scope
-    )
+    if req.analysis is not None:
+        det_answer, actions = _build_question_aware_analysis(
+            req.question, req.analysis, sector_breakdown, missing_sectors, req.market_scope
+        )
+    else:
+        det_answer, actions = _build_standalone_conversational_reply(
+            req.question,
+            active_symbols,
+            sector_breakdown,
+            missing_sectors,
+            req.market_scope,
+            req.portfolio_summary,
+        )
+
     disclaimer = (
         "Quantitative diversification analysis is grounded in historical sample correlations and "
         "minimum-variance math. For research and educational use only — not investment advice."
@@ -252,39 +407,60 @@ def ask_diverse_risk_advisor(
 
     if gemini_api_key:
         post_fn = http_post or httpx.post
-        context_payload = {
-            "market_scope": req.market_scope or "CUSTOM",
-            "selected_sectors": req.selected_sectors,
-            "selected_stocks": req.analysis.symbols,
-            "sector_breakdown_pct": sector_breakdown,
-            "country_breakdown_pct": country_breakdown,
-            "missing_defensive_sectors": missing_sectors,
-            "equal_weight_volatility_pct": round(req.analysis.equal_weight_volatility * 100, 2),
-            "standalone_avg_volatility_pct": round(req.analysis.standalone_weighted_volatility * 100, 2),
-            "diversification_ratio": req.analysis.diversification_ratio,
-            "risk_reduction_pct": req.analysis.risk_reduction_pct,
-            "gmv_volatility_pct": round(req.analysis.gmv_volatility * 100, 2),
-            "avg_pairwise_correlation": req.analysis.avg_pairwise_correlation,
-            "highest_correlation_pairs": [p.dict() for p in req.analysis.highest_correlation_pairs[:3]],
-            "lowest_correlation_pairs": [p.dict() for p in req.analysis.lowest_correlation_pairs[:3]],
-            "top_suggested_combinations": [c.dict() for c in req.analysis.suggested_combinations[:3]],
-            "top_candidate_additions": [c.dict() for c in req.analysis.candidate_additions[:5]],
-        }
-        prompt = (
-            "You are a Senior Quantitative Portfolio Strategist & Financial Risk Manager inside QuantAI. "
-            "Help the user build and refine a minimum-risk equity portfolio following a top-down workflow "
-            "(Market Scope -> Industry Pairing -> Stock Selection -> Weighting & Risk Reduction). "
-            "Use the verified quantitative metrics below as the factual anchor, AND proactively recommend "
-            "specific NEW stocks, industries, ETFs, or weight adjustments whenever the user asks to refine "
-            "or customize their portfolio. Never invent fake live prices or promise guaranteed returns. "
-            "Do NOT use raw markdown '**' bold asterisks; write crisp, natural paragraphs and plain '• ' bullets. "
-            "Reply in the exact same language as the user's question.\n\n"
-            f"VERIFIED PORTFOLIO DATA:\n{json.dumps(context_payload, indent=2)}\n\n"
-            f"USER REQUEST:\n{req.question}"
+        if req.analysis is not None:
+            context_payload = {
+                "market_scope": req.market_scope or "CUSTOM",
+                "selected_sectors": req.selected_sectors,
+                "selected_stocks": req.analysis.symbols,
+                "sector_breakdown_pct": sector_breakdown,
+                "country_breakdown_pct": country_breakdown,
+                "missing_defensive_sectors": missing_sectors,
+                "equal_weight_volatility_pct": round(req.analysis.equal_weight_volatility * 100, 2),
+                "standalone_avg_volatility_pct": round(req.analysis.standalone_weighted_volatility * 100, 2),
+                "diversification_ratio": req.analysis.diversification_ratio,
+                "risk_reduction_pct": req.analysis.risk_reduction_pct,
+                "gmv_volatility_pct": round(req.analysis.gmv_volatility * 100, 2),
+                "avg_pairwise_correlation": req.analysis.avg_pairwise_correlation,
+                "highest_correlation_pairs": [p.dict() for p in req.analysis.highest_correlation_pairs[:3]],
+                "lowest_correlation_pairs": [p.dict() for p in req.analysis.lowest_correlation_pairs[:3]],
+                "top_suggested_combinations": [c.dict() for c in req.analysis.suggested_combinations[:3]],
+                "top_candidate_additions": [c.dict() for c in req.analysis.candidate_additions[:5]],
+            }
+        else:
+            context_payload = {
+                "market_scope": req.market_scope or "Global",
+                "selected_sectors": req.selected_sectors,
+                "selected_stocks": active_symbols,
+                "sector_breakdown_pct": sector_breakdown,
+                "country_breakdown_pct": country_breakdown,
+                "missing_defensive_sectors": missing_sectors,
+                "portfolio_10y_summary": req.portfolio_summary or "Not yet simulated",
+            }
+        system_text = (
+            "You are a warm, sharp, down-to-earth senior portfolio manager chatting directly with the user like a real human colleague. "
+            "Keep the conversation completely natural:\n"
+            "- If the user greets you ('Hi', 'Good morning', 'Chào bạn') or makes small talk, respond warmly in 1-2 short natural sentences without lecturing or dumping stats.\n"
+            "- Remember what was said earlier in the conversation so follow-up questions ('what about the second one?', 'what if I drop CEO?') flow naturally.\n"
+            "- When the user asks about stocks, sectors, weights, or risk, give direct, opinionated, practical answers referencing their live portfolio context below — never sound like a stiff template or say 'As a Senior Portfolio Manager reviewing...'.\n"
+            "- Reply in the exact language the user writes in (Vietnamese or English). Do NOT use raw '**' markdown asterisks; write clean natural text.\n"
+            "- Never fabricate live prices or promise guaranteed returns.\n\n"
+            f"CURRENT LIVE PORTFOLIO CONTEXT (use only when relevant to the user's message):\n{json.dumps(context_payload, indent=2)}"
         )
 
+        contents_turns: List[Dict[str, Any]] = []
+        for turn in req.conversation_history[-16:]:
+            g_role = "model" if turn.role == "assistant" else "user"
+            contents_turns.append({"role": g_role, "parts": [{"text": turn.content}]})
+        contents_turns.append({"role": "user", "parts": [{"text": req.question}]})
+
+        gemini_payload: Dict[str, Any] = {
+            "systemInstruction": {"parts": [{"text": system_text}]},
+            "contents": contents_turns,
+            "generationConfig": {"temperature": 0.7, "maxOutputTokens": 700},
+        }
+
         endpoints: List[tuple[str, str, Dict[str, str], Dict[str, str]]] = []
-        models_to_try = list(dict.fromkeys([gemini_model, "gemini-2.0-flash", "gemini-1.5-flash"]))
+        models_to_try = list(dict.fromkeys(["gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-3-flash-preview", "gemini-flash-latest", "gemini-3.1-flash-lite-preview", gemini_model]))
         for m in models_to_try:
             endpoints.append((
                 m,
@@ -300,40 +476,52 @@ def ask_diverse_risk_advisor(
                     {"key": gemini_api_key},
                 ))
 
+        import time as _time
         for model_name, url, headers, params in endpoints:
-            try:
-                resp = post_fn(
-                    url,
-                    headers=headers,
-                    params=params,
-                    json={"contents": [{"parts": [{"text": prompt}]}]},
-                    timeout=timeout,
-                )
-                status = getattr(resp, "status_code", 200)
-                if status == 200:
-                    data = resp.json()
-                    text = (
-                        data.get("candidates", [{}])[0]
-                        .get("content", {})
-                        .get("parts", [{}])[0]
-                        .get("text")
+            for attempt in range(2):
+                try:
+                    resp = post_fn(
+                        url,
+                        headers=headers,
+                        params=params,
+                        json=gemini_payload,
+                        timeout=timeout,
                     )
-                    if isinstance(text, str) and text.strip():
-                        clean_text = text.strip().replace("**", "")
-                        return DiverseRiskAdvisorResponse(
-                            answer=clean_text,
-                            engine_used=f"QuantAI Strategist ({model_name})",
-                            used_llm=True,
-                            sector_breakdown=sector_breakdown,
-                            country_breakdown=country_breakdown,
-                            missing_defensive_sectors=missing_sectors,
-                            recommended_actions=actions,
-                            disclaimer=disclaimer,
-                        )
-                else:
-                    logger.warning("Gemini endpoint %s returned HTTP %s: %s", url, status, getattr(resp, "text", "")[:180])
-            except Exception as exc:
-                logger.warning("Gemini endpoint %s failed: %s", url, exc)
+                    status = getattr(resp, "status_code", 200)
+                    if status == 200:
+                        data = resp.json()
+                        parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+                        text_chunks = [
+                            p.get("text", "")
+                            for p in parts
+                            if isinstance(p, dict) and isinstance(p.get("text"), str) and not p.get("thought")
+                        ]
+                        text = "\n".join(c.strip() for c in text_chunks if c.strip())
+                        if not text and parts and isinstance(parts[-1], dict):
+                            text = str(parts[-1].get("text") or "").strip()
+                        if text:
+                            clean_text = text.replace("**", "")
+                            return DiverseRiskAdvisorResponse(
+                                answer=clean_text,
+                                engine_used=f"Gemini ({model_name})",
+                                used_llm=True,
+                                sector_breakdown=sector_breakdown,
+                                country_breakdown=country_breakdown,
+                                missing_defensive_sectors=missing_sectors,
+                                recommended_actions=actions,
+                                disclaimer=disclaimer,
+                            )
+                        break
+                    elif status in (503, 429) and attempt == 0:
+                        logger.warning("Gemini %s busy (HTTP %s), retrying once...", model_name, status)
+                        _time.sleep(0.9)
+                        continue
+                    else:
+                        logger.warning("Gemini endpoint %s returned HTTP %s: %s", url, status, getattr(resp, "text", "")[:180])
+                        break
+                except Exception as exc:
+                    logger.warning("Gemini endpoint %s failed: %s", url, exc)
+                    break
 
     return DiverseRiskAdvisorResponse(
         answer=det_answer,
