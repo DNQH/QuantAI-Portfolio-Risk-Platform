@@ -1,60 +1,49 @@
-# QuantAI — Global Quantitative Investment Research, Portfolio Optimization & Financial Risk Management Platform
+# QuantAI — Global Portfolio Risk Optimization & Financial Risk Management Platform
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
-![Python](https://img.shields.io/badge/python-3.11+-3776AB)
-![React](https://img.shields.io/badge/react-18%20%2B%20TypeScript-61DAFB)
+[[https://img.shields.io/badge/version-4.0.0-2563EB](https://img.shields.io/badge/version-4.0.0-2563EB)]
+[[https://img.shields.io/badge/license-MIT-10B981](https://img.shields.io/badge/license-MIT-10B981)]
+[[https://img.shields.io/badge/python-3.11%2B-3776AB](https://img.shields.io/badge/python-3.11%2B-3776AB)]
+[[https://img.shields.io/badge/react-18%20%2B%20TypeScript-61DAFB](https://img.shields.io/badge/react-18%20%2B%20TypeScript-61DAFB)]
 
 ## Project Overview
-**QuantAI** is a full-stack, modular quantitative investment research, portfolio optimization, financial risk management, machine learning forecasting, and strategy backtesting platform for global equity markets. Designed as an institutional-grade technical portfolio project for Finance, Quantitative Finance, and Financial Engineering applications, QuantAI prioritizes **genuine market data provenance**, **verified financial mathematics**, **leakage-free ML validation**, and **bias-free backtesting**.
 
-## Key Features (Phases 1–8 Complete)
-1. **Global Market Data Center ($0 Free Stack + Extensible Paid Hooks):**
-   - Multi-provider abstraction (`BaseMarketDataProvider`) with Finnhub (US real-time quotes & WebSocket), Vnstock v6 (Vietnam HOSE/HNX), SSI FastConnect V3 (Vietnam live streaming with SSI credentials), Frankfurter v2 (all 15 target FX currencies as `DAILY_REFERENCE`), and explicitly labeled `yfinance` educational historical fallback, plus drop-in hooks for EODHD, Twelve Data, and Massive.
-   - Strict provenance tags (`LIVE`, `DELAYED`, `HISTORICAL`, `DAILY_REFERENCE`, `DATA_UNAVAILABLE`) with dual timestamps (`market_timestamp` and `retrieval_timestamp`) and zero silent fallback.
-   - Effective-dated ISO 10383 MIC symbology covering US, Vietnam (including the scheduled **December 28, 2026 HNX-to-HOSE consolidation**), Europe, Asia, ASEAN, and Australia.
-2. **Quantitative Analysis (`backend/app/analytics/`):** Simple/log/cumulative/annualized returns, rolling & annualized volatility (`ddof=1`), Sharpe & Sortino ratios, Maximum Drawdown + recovery bars, SMA (20/50/100/200), EMA (12/26), canonical Wilder RSI (14), MACD (12/26/9), ROC, Bollinger Bands, ATR (14), unbiased skewness/kurtosis, and aligned correlation & annualized covariance matrices.
-3. **Portfolio Optimization & Multi-Currency FX (`backend/app/portfolio/`):** SciPy SLSQP Mean-Variance Optimization, Efficient Frontier, Global Minimum Variance (GMV), Maximum Sharpe Portfolio, marginal/percentage risk contributions, CAPM Beta & Jensen's Alpha, exact FX return decomposition `(1 + r_local)(1 + r_fx) - 1`, and SQLite portfolio persistence.
-4. **Financial Risk Management (`backend/app/risk/`):** Historical VaR/CVaR, Parametric Normal VaR/CVaR, deterministic seeded Monte Carlo VaR/CVaR (95% & 99%), Tracking Error, Information Ratio, deterministic Stress Testing scenarios, and currency exposure breakdown.
-5. **Machine Learning & Forecasting (`backend/app/forecasting/`):** Chronological train/test split, train-only feature scaling (zero leakage), expanding-window walk-forward CV, and 6 genuinely trained models (`naive_last_price`, `naive_historical_mean`, `ridge_regression`, `arima_ar4_returns`, `random_forest`, `gradient_boosting`) evaluated by MAE, RMSE, MAPE, R², and residuals — zero fabricated confidence scores.
-6. **Quantitative Signals & Backtesting (`backend/app/backtesting/`):** Inspectable rules-based signals (RSI, MACD, SMA crossover, Momentum, Volatility) + strict T+1 bias-free historical strategy backtester (SMA Crossover, RSI Mean Reversion, Buy & Hold) with configurable commission and slippage bps.
+**QuantAI** is a full-stack, institutional-grade **portfolio risk optimization, systemic macro-risk tracking, and corporate credit risk management platform** for global equity markets. Built as a technical portfolio project for Master's applications in **Finance, Quantitative Finance, Financial Engineering, and Financial Risk Management**, QuantAI combines verified financial mathematics (SciPy SLSQP, Black-Scholes-Merton, Altman Z-Score, Ohlson O-Score, VaR/CVaR, Monte Carlo simulation) with transparent market data provenance and a live multi-turn AI strategist.
+
+## Core Capabilities (v4.0.0)
+
+1. **Global Portfolio Risk Workbench (`backend/app/portfolio/`):**
+   - Multi-market portfolio construction across US, Vietnam, Europe, Asia, and Australia covering **all 11 GICS sectors**, with pre-built low-correlation sector pairings and full custom ticker selection.
+   - Hypothetical capital deployment simulator supporting up to **1,000,000,000** across 8 currencies (`USD`, `VND`, `EUR`, `GBP`, `JPY`, `SGD`, `AUD`, `HKD`).
+   - SciPy SLSQP **Minimum Variance (GMV)**, **Maximum Sharpe**, and **Equal-Weight** optimization visualized via an interactive allocation Pie Chart, exact per-stock capital weights, Diversification Ratio, and Volatility Reduction %.
+   - Integrated **10-Year Historical Performance Proof** (equity curve vs. Equal-Weight Buy & Hold, CAGR, Sharpe, Max Drawdown, calendar-year breakdown) plus **5,000-path seeded Monte Carlo Forward Scenario Forecasts** (1Y / 3Y / 5Y Bear, Base, and Bull regimes).
+   - **Multi-Turn Conversational AI Assistant** powered by **Gemini 3.1 Flash Lite**, grounded in live portfolio weights, sector exposure, and 10-year risk metrics.
+
+2. **Macro & Systemic Risk Tracker (`backend/app/risk/tracker.py`):**
+   - Tracks 5 active systemic risk regimes (Higher-for-Longer Rates, Trade Tariffs & FX Volatility, Energy/Inflation Shocks, Credit & Refinancing Stress, and AI Valuation Cycles) across all **11 GICS sectors**.
+   - Ranks sectors and individual stocks from **Most Severely Impacted (`SEVERE`) to Most Resilient (`LOW / RESILIENT`)**, documenting **10-year historical impact episodes (2016-2026)**, 12-36 month forward outlook, and **5 Emerging Future Risk Hypotheses** with defensive hedging guidance.
+
+3. **Financial Risk Analytics & 4-Stage Corporate Bankruptcy Pipeline (`backend/app/risk/`):**
+   - Plain-English **Market Downside Risk**: Historical, Parametric Normal, and deterministic seeded Monte Carlo **VaR & CVaR (Expected Shortfall)** at 95% and 99% confidence, plus historical crisis Stress Testing (2008 GFC, 2020 Liquidity Shock, Rate Shock, EM FX Depreciation).
+   - **4-Stage Corporate Bankruptcy & 12-Month Default Probability (PD) Pipeline**: Corporate Financial Statements -> Liquidity/Leverage/Profitability/Cash-Flow Ratios -> **7 Credit Models** (*Altman Z-Score*, *Ohlson O-Score*, *Merton Structural Distance-to-Default*, *DSCR*, *Interest Coverage*, *Logistic Regression PD*, and *XGBoost / Gradient Boosted Trees PD*) -> **Ensemble 12M PD %** & Credit Risk Grade.
+
+4. **Crowd Sentiment & Prediction Markets — "What People Think?" (`backend/app/sentiment/`):**
+   - Aggregates live prediction-market probabilities from **Polymarket (Gamma API)** alongside social/news discussions from **Reddit** and **Finnhub Company News**.
+   - Computes a transparent **Bayesian-Logistic Horizon Sentiment Model** (`1W`, `1M`, `3M`) outputting a directional verdict (`POSITIVE` / `NEUTRAL` / `NEGATIVE`) and implied positive outlook probability.
+
+5. **Global Market Data Explorer & FX Converter (`backend/app/data/`, `backend/app/fx/`):**
+   - Cascading Country -> Exchange selector (**NYSE, NASDAQ, HOSE, HNX, UPCOM, LSE, Xetra, TSE, HKEX, SGX, ASX** and more) with 10 iconic flagship stocks per exchange and **live global autocomplete search** across tens of thousands of listed equities.
+   - Multi-provider architecture (`Finnhub`, `Twelve Data`, `SSI FastConnect V3`, `VNDirect dchart`, `TCBS`, `Vnstock v6`, `yfinance` educational fallback, and `Frankfurter v2` FX rates) with strict provenance tags (`LIVE`, `DELAYED`, `HISTORICAL`, `DAILY_REFERENCE`, `DATA_UNAVAILABLE`) and effective-dated ISO 10383 MIC symbology (including the scheduled **December 28, 2026 HNX-to-HOSE consolidation**).
+   - Full IPO-to-present interactive candlestick charts (`1m` to `1mo`) with Volume Histogram and direct navigation to `Risk Analytics`.
 
 ## Architecture & Technology Stack
-- **Backend:** Python 3.11+, FastAPI, Pydantic, Uvicorn, httpx, SQLite, NumPy, Pandas, SciPy
+
+- **Backend:** Python 3.11+, FastAPI, Pydantic, Uvicorn, httpx, SQLite, NumPy, Pandas, SciPy, scikit-learn / XGBoost *(also includes tested modular `analytics/`, `forecasting/`, and `backtesting/` REST APIs)*
 - **Frontend:** React 18, TypeScript, Vite, Tailwind CSS, TradingView Lightweight Charts, Recharts
-- **CI & Testing:** GitHub Actions (`.github/workflows/ci.yml`), `unittest` / `pytest` (25 automated unit & API tests)
-- **Documentation:** [`docs/architecture.md`](docs/architecture.md), [`docs/data_sources.md`](docs/data_sources.md), [`docs/financial_formulas.md`](docs/financial_formulas.md), [`docs/phase1_acceptance.md`](docs/phase1_acceptance.md), [`PROJECT_STATUS.md`](PROJECT_STATUS.md), [`CHANGELOG.md`](CHANGELOG.md)
+- **CI & Automated Testing:** GitHub Actions (`.github/workflows/ci.yml`) — **38 automated Python unit & API tests** + strict TypeScript & Vite production build
+- **Documentation:** `docs/architecture.md`, `docs/data_sources.md`, `docs/financial_formulas.md`, `CHANGELOG.md`
 
-## Quick Start (Local Development)
+## Quick Start (Local)
 
-```bash
-# 1. Configure environment variables (NEVER commit .env)
-cp .env.example .env
-
-# 2. Run Backend API & Swagger Docs (Terminal 1)
-cd backend
-python3 -m venv .venv
-source .venv/bin/activate   # Windows PowerShell: .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-pip install "vnstock>=6.0" yfinance websockets scikit-learn statsmodels
-uvicorn app.main:app --reload --port 8000
-```
-Interactive OpenAPI / Swagger docs: `http://127.0.0.1:8000/docs`
-
-```bash
-# 3. Run All 25 Automated Tests
-cd backend
-python3 -m unittest discover -s tests -v
-```
-
-```bash
-# 4. Run Frontend Dashboard (Terminal 2)
-cd frontend
-npm install
-npm run dev
-```
-Dashboard URL: `http://localhost:5173`
-
-## Known Limitations & Disclaimer
-- Free-tier APIs do not grant unrestricted commercial real-time global equity redistribution; see [`docs/data_sources.md`](docs/data_sources.md) for exact permissions and paid upgrade paths.
-- All analytics, forecasts, and backtests are for quantitative research and education only and do **not** constitute investment advice or guarantee future returns.
+1. **Backend:** `cd backend && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt && python -m uvicorn app.main:app --reload --port 8000`
+2. **Frontend (new terminal):** `cd frontend && npm install && npm run dev`
+3. Open `http://localhost:5173`. Run tests anytime via `cd backend && python -m unittest discover -s tests -v`.
