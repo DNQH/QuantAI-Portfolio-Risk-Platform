@@ -690,8 +690,8 @@ export const App: React.FC = () => {
             instrumentId={selectedId}
             cleanTicker={cleanTicker(selectedId)}
             companyName={instruments.find((i) => i.instrument_id === selectedId)?.company_name || cleanTicker(selectedId)}
-            recentReturn20d={analytics?.cumulative_return ?? null}
-            annualizedVol={analytics?.annualized_volatility ?? null}
+            recentReturn20d={analytics?.summary.total_return ?? null}
+            annualizedVol={analytics?.summary.annualized_volatility ?? null}
             darkMode={darkMode}
           />
         )}
