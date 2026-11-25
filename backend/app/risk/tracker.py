@@ -1,4 +1,4 @@
-"""Macro & Systemic Risk Tracker across all 11 GICS Sectors (v4.0.0).
+"""Macro & Systemic Risk Tracker across all 11 GICS Sectors (introduced in v4.0.0).
 
 Maps live & structural market risk factors to all 11 GICS sectors and ranks individual
 equities from most severely impacted to least impacted, providing:
@@ -11,7 +11,7 @@ equities from most severely impacted to least impacted, providing:
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Literal
 
 from pydantic import BaseModel
 

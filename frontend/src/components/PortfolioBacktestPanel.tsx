@@ -63,8 +63,8 @@ export const PortfolioBacktestPanel: React.FC<Props> = ({
         initial_capital: initialCapital,
       });
       setResult(res);
-    } catch (err: any) {
-      setError(err?.message || 'Failed to run 10-year portfolio backtest.');
+    } catch (err: unknown) {
+      setError(err instanceof Error && err.message ? err.message : 'Failed to run 10-year portfolio backtest.');
     } finally {
       setLoading(false);
     }
@@ -196,7 +196,7 @@ export const PortfolioBacktestPanel: React.FC<Props> = ({
             <label className="text-[11px] opacity-65 block mb-1">Weighting Strategy</label>
             <select
               value={allocation}
-              onChange={(e) => setAllocation(e.target.value as any)}
+              onChange={(e) => setAllocation(e.target.value as typeof allocation)}
               className={`w-full rounded-lg border px-2.5 py-1.5 text-xs ${
                 darkMode ? 'bg-slate-950 border-slate-700' : 'bg-white border-slate-300'
               }`}
@@ -210,7 +210,7 @@ export const PortfolioBacktestPanel: React.FC<Props> = ({
             <label className="text-[11px] opacity-65 block mb-1">Rebalancing</label>
             <select
               value={rebalance}
-              onChange={(e) => setRebalance(e.target.value as any)}
+              onChange={(e) => setRebalance(e.target.value as typeof rebalance)}
               className={`w-full rounded-lg border px-2.5 py-1.5 text-xs ${
                 darkMode ? 'bg-slate-950 border-slate-700' : 'bg-white border-slate-300'
               }`}

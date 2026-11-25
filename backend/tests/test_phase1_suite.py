@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import sys
 import unittest
 from datetime import date, datetime, timezone
@@ -26,7 +25,6 @@ from app.core.symbology import (
 )
 from app.data.freshness import classify_quote_freshness, validate_ohlcv_bars
 from app.data.providers.finnhub import FinnhubProvider
-from app.data.providers.ssi_fastconnect import SSIFastConnectProvider
 from app.data.registry import MarketDataRegistry
 from app.fx.frankfurter import TARGET_CURRENCIES, FrankfurterFXProvider
 from app.main import create_app

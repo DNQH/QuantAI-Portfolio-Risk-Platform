@@ -1,4 +1,4 @@
-"""FastAPI REST and WebSocket endpoints for QuantAI v1.3.0."""
+"""FastAPI REST and WebSocket endpoints for QuantAI."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from app.analytics.engine import (
     MatrixAnalyticsRequest,
@@ -241,10 +242,11 @@ def diverse_risk_endpoint(payload: DiverseRiskRequest) -> DiverseRiskResponse:
 def assistant_status_endpoint(
     registry: MarketDataRegistry = Depends(get_registry),
 ) -> Dict[str, object]:
+    # Never echo any part of a secret back to unauthenticated clients (the previous
+    # response leaked the first 6 characters of GEMINI_API_KEY).
     key = registry.settings.gemini_api_key
     return {
         "gemini_configured": bool(key),
-        "key_prefix": (key[:6] + "...") if key and len(key) >= 6 else None,
         "gemini_model": registry.settings.gemini_model,
     }
 
@@ -353,9 +355,9 @@ def portfolio_simulate_10y_endpoint(
             "company_name": m.company_name if m else tkr,
             "sector": (m.sector or "Equity") if m else "Equity",
         }
+    excluded_list: List[Dict[str, str]] = []
     if payload.asset_series is None:
         fetched: Dict[str, List[OHLCVBar]] = {}
-        excluded_list: List[Dict[str, str]] = []
         period_str = "10y" if payload.years >= 10 else ("5y" if payload.years >= 5 else "2y")
         for iid in payload.instrument_ids:
             ohlcv = registry.get_ohlcv(
@@ -377,11 +379,11 @@ def portfolio_simulate_10y_endpoint(
         payload = payload.copy(update={"asset_series": fetched})
     try:
         res = run_portfolio_10y_simulation(payload, metadata_map=meta_map)
-        if 'excluded_list' in locals() and excluded_list:
-            res = res.copy(update={'excluded_tickers': excluded_list})
+        if excluded_list:
+            res = res.copy(update={"excluded_tickers": excluded_list})
         return res
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/backtesting/portfolio", response_model=PortfolioBacktestResponse)
@@ -410,7 +412,7 @@ def portfolio_backtest_endpoint(
     try:
         return run_portfolio_backtest(payload)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.websocket("/ws/quotes/{instrument_id}")
@@ -419,7 +421,10 @@ async def quote_stream_ws(websocket: WebSocket, instrument_id: str) -> None:
     registry: MarketDataRegistry = websocket.app.state.registry
     try:
         parse_instrument_id(instrument_id)
-        snapshot = registry.get_quote(
+        # Provider calls are blocking HTTP; run them in the threadpool so a slow upstream
+        # cannot stall the event loop (and every other request) while we wait.
+        snapshot = await run_in_threadpool(
+            registry.get_quote,
             instrument_id=instrument_id,
             require_live=True,
             allow_educational_fallback=False,
@@ -428,7 +433,8 @@ async def quote_stream_ws(websocket: WebSocket, instrument_id: str) -> None:
         while True:
             msg = await websocket.receive_text()
             if msg.strip().lower() == "refresh":
-                refreshed = registry.get_quote(
+                refreshed = await run_in_threadpool(
+                    registry.get_quote,
                     instrument_id=instrument_id,
                     require_live=True,
                     allow_educational_fallback=False,

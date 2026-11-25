@@ -1,4 +1,4 @@
-"""FastAPI application entry point for QuantAI v1.0.0."""
+"""FastAPI application entry point for QuantAI."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app import __version__
 from app.api.routes import router as v1_router
 from app.core.config import Settings, get_settings
 from app.core.database import DatabaseManager
@@ -32,7 +33,7 @@ def create_app(
 
     app = FastAPI(
         title="QuantAI — Global Quantitative Investment Research, Portfolio & Risk API",
-        version="1.0.0",
+        version=__version__,
         description=(
             "Full-stack quantitative finance platform: verified global market data, "
             "quantitative analysis, MPT portfolio optimization, VaR/CVaR risk management, "
@@ -40,12 +41,18 @@ def create_app(
         ),
     )
 
+    # The API is stateless (no cookies / session auth), so credentials are never needed.
+    # With allow_credentials=True a wildcard origin would make Starlette reflect ANY Origin
+    # header back with credentials enabled; keep credentials off and restrict verbs/headers.
+    if cfg.cors_allows_any_origin and cfg.environment.lower() == "production":
+        logger.warning("QUANTAI_CORS_ORIGINS contains '*' in production; any website can call this API.")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cfg.cors_origin_list,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Content-Type", "Accept"],
+        max_age=600,
     )
 
     @app.exception_handler(ValueError)

@@ -10,10 +10,11 @@ Thank you for contributing to **QuantAI**! This project is built as a rigorous, 
 
 ## Local Development Workflow
 ```bash
-# 1. Backend tests
+# 1. Backend lint & tests
 cd backend
-python -m unittest discover -s tests -v
-# or: pytest -v
+pip install -r requirements-dev.txt   # runtime deps + pytest + ruff
+ruff check .
+python -m pytest -q
 
 # 2. Frontend type-check & build
 cd ../frontend

@@ -7,7 +7,7 @@ Strict anti-leakage and anti-fake-AI guarantees:
       1. naive_last_price       (Random-walk benchmark)
       2. naive_historical_mean  (Training-fold mean return benchmark)
       3. ridge_regression       (Closed-form L2 linear regression)
-      4. ar_differenced         (Statistical AR(5) on returns / ARIMA(5,1,0))
+      4. arima_ar4_returns      (AR model on return lags 1, 2, 3 and 5, ridge-stabilised)
       5. random_forest          (Bagged CART regression tree ensemble)
       6. gradient_boosting      (Stage-wise residual boosted CART trees)
   - Reports MAE, RMSE, MAPE, R², residuals, training/test windows, and timestamps.
@@ -19,11 +19,12 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 from pydantic import BaseModel, Field
 
+from app.analytics.bars import prepare_bars
 from app.analytics.indicators import rsi_wilder, sma
 from app.core.models import OHLCVBar
 
@@ -288,7 +289,7 @@ def _eval_price_metrics(actual: np.ndarray, predicted: np.ndarray) -> Tuple[floa
 
 
 def run_forecasting_suite(req: ForecastRequest) -> ForecastResponse:
-    ordered = sorted(req.bars, key=lambda b: b.timestamp)
+    ordered, _ = prepare_bars(req.bars, min_count=40, context="Forecasting")
     X, y, base_prices, target_ts, feature_names, latest_X = _build_supervised_features(ordered)
     n_samples = len(y)
     if n_samples < 15:
@@ -389,7 +390,7 @@ def run_forecasting_suite(req: ForecastRequest) -> ForecastResponse:
         _walk_forward_rmse(lambda xtr, ytr, xva: _predict_ridge(xva, *_fit_ridge(xtr, ytr, req.ridge_alpha))),
     )
 
-    # 4. Statistical AR(4) on Returns (ARIMA(4,1,0) on log/price levels)
+    # 4. Statistical AR model on the 4 return-lag features (lags 1, 2, 3, 5), ridge-stabilised.
     b_ar, w_ar = _fit_ridge(X_train[:, :4], y_train, alpha=0.05)
     _record(
         "arima_ar4_returns",

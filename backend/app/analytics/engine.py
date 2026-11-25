@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from app.analytics.bars import adjusted_closes, adjusted_high_low_close, prepare_bars, resolve_periods_per_year
 from app.analytics.indicators import (
     atr,
     bollinger_bands,
@@ -38,7 +39,12 @@ class SingleAssetAnalyticsRequest(BaseModel):
     instrument_id: str = Field(..., description="Exchange-qualified identifier, e.g. XNAS:AAPL")
     bars: List[OHLCVBar] = Field(..., min_items=2, description="Chronological OHLCV bars")
     risk_free_rate_annual: float = Field(default=0.0, description="Annualized risk-free rate (e.g. 0.04 for 4%)")
-    periods_per_year: int = Field(default=252, ge=1, le=365)
+    periods_per_year: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=365,
+        description="Annualization factor. Defaults by interval (1d=252, 1wk=52, 1mo=12) or is inferred from timestamps.",
+    )
     interval: str = Field(default="1d")
 
 
@@ -123,17 +129,18 @@ def _last_valid(seq: List[Optional[float]]) -> Optional[float]:
 
 
 def run_single_asset_analytics(req: SingleAssetAnalyticsRequest) -> SingleAssetAnalyticsResponse:
-    ordered = sorted(req.bars, key=lambda b: b.timestamp)
+    ordered, data_warnings = prepare_bars(req.bars, min_count=2, context="Single-asset analytics")
     timestamps = [b.timestamp.isoformat() for b in ordered]
-    closes = [b.adjusted_close if b.adjusted_close is not None else b.close for b in ordered]
-    highs = [b.high for b in ordered]
-    lows = [b.low for b in ordered]
+    closes = adjusted_closes(ordered)
+    # ATR must use high/low/close on the same (adjusted) basis as the closes.
+    atr_highs, atr_lows, atr_closes = adjusted_high_low_close(ordered)
+    ppy = resolve_periods_per_year(req.periods_per_year, req.interval, [b.timestamp for b in ordered])
 
     s_ret = simple_returns(closes)
     l_ret = log_returns(closes)
     c_ret = cumulative_returns(closes)
     dd = drawdown_analysis(closes)
-    roll_vol_20 = rolling_volatility(s_ret, window=20, periods_per_year=req.periods_per_year)
+    roll_vol_20 = rolling_volatility(s_ret, window=20, periods_per_year=ppy)
 
     sma20 = sma(closes, 20)
     sma50 = sma(closes, 50)
@@ -145,16 +152,16 @@ def run_single_asset_analytics(req: SingleAssetAnalyticsRequest) -> SingleAssetA
     macd_out = macd(closes, 12, 26, 9)
     roc12 = rate_of_change(closes, 12)
     bb = bollinger_bands(closes, 20, 2.0, ddof=1)
-    atr14 = atr(highs, lows, closes, 14)
+    atr14 = atr(atr_highs, atr_lows, atr_closes, 14)
     stats_out = descriptive_statistics(s_ret)
 
     summary = SingleAssetSummaryMetrics(
         observations=len(ordered),
         total_return=c_ret[-1] if c_ret else None,
-        annualized_return=annualized_return(closes, req.periods_per_year),
-        annualized_volatility=annualized_volatility(s_ret, req.periods_per_year),
-        sharpe_ratio=sharpe_ratio(s_ret, req.risk_free_rate_annual, req.periods_per_year),
-        sortino_ratio=sortino_ratio(s_ret, req.risk_free_rate_annual, req.periods_per_year),
+        annualized_return=annualized_return(closes, ppy),
+        annualized_volatility=annualized_volatility(s_ret, ppy),
+        sharpe_ratio=sharpe_ratio(s_ret, req.risk_free_rate_annual, ppy),
+        sortino_ratio=sortino_ratio(s_ret, req.risk_free_rate_annual, ppy),
         max_drawdown=dd.max_drawdown,
         max_drawdown_recovery_bars=dd.recovery_bars,
         latest_sma_20=_last_valid(sma20),
@@ -204,12 +211,13 @@ def run_single_asset_analytics(req: SingleAssetAnalyticsRequest) -> SingleAssetA
         bollinger_lower=bb["lower"],
         atr_14=atr14,
         assumptions=[
-            f"Annualization assumes {req.periods_per_year} trading periods per year (interval={req.interval}).",
+            f"Annualization assumes {ppy:.1f} periods per year (interval={req.interval}).",
             f"Sharpe and Sortino ratios use annualized risk-free rate = {req.risk_free_rate_annual:.4%}.",
             "Volatility and Bollinger Bands use unbiased sample standard deviation (ddof=1).",
-            "RSI (14) and ATR (14) use canonical Wilder exponential smoothing.",
+            "RSI (14) and ATR (14) use canonical Wilder exponential smoothing; ATR high/low are rescaled to the adjusted-close basis.",
             "Historical metrics are backward-looking descriptors and do not guarantee future returns.",
-        ],
+        ]
+        + data_warnings,
     )
 
 
