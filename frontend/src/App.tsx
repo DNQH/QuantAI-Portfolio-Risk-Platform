@@ -342,9 +342,12 @@ export const App: React.FC = () => {
   const panelBg = darkMode ? 'bg-terminal-surface border-terminal-border' : 'bg-white border-slate-200';
 
   return (
-    <div className={`min-h-screen flex ${shellBg}`}>
-      <aside className={`w-64 shrink-0 border-r p-4 flex flex-col ${panelBg}`}>
-        <div className="mb-6 border-b border-terminal-border pb-4 flex items-center justify-between">
+    <div className={`min-h-screen flex flex-col md:flex-row ${shellBg}`}>
+      {/* Below md the sidebar collapses into a top bar with a horizontally scrollable tab strip. */}
+      <aside
+        className={`w-full md:w-64 md:shrink-0 border-b md:border-b-0 md:border-r p-3 md:p-4 flex flex-col md:sticky md:top-0 md:h-screen ${panelBg}`}
+      >
+        <div className="mb-3 md:mb-6 border-b border-terminal-border pb-3 md:pb-4 flex items-center justify-between">
           <div>
             <div className="text-lg font-bold tracking-tight">{en.brand.name}</div>
             <div className="mt-1 font-mono text-[11px] text-emerald-400">v{APP_VERSION}</div>
@@ -354,12 +357,13 @@ export const App: React.FC = () => {
           </button>
         </div>
 
-        <nav className="space-y-1 flex-1">
+        <nav className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1 md:mx-0 md:flex-1 md:flex-col md:overflow-y-auto md:overflow-x-visible md:px-0 md:pb-0">
           {NAV_ITEMS.map((item) => (
             <button
               key={item.key}
               onClick={() => setActiveTab(item.key)}
-              className={`w-full flex items-center justify-between rounded-md px-3 py-2 text-left text-xs font-medium transition ${
+              aria-current={activeTab === item.key ? 'page' : undefined}
+              className={`shrink-0 whitespace-nowrap md:w-full flex items-center justify-between rounded-md border border-transparent px-3 py-2 text-left text-xs font-medium transition ${
                 activeTab === item.key ? 'bg-blue-600/20 text-blue-400 border border-blue-500/40' : 'opacity-80 hover:opacity-100'
               }`}
             >
@@ -369,13 +373,13 @@ export const App: React.FC = () => {
         </nav>
       </aside>
 
-      <main className="flex-1 p-6 overflow-y-auto">
+      <main className="flex-1 min-w-0 p-4 md:p-6">
         <header className="mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-terminal-border pb-4">
-          <div>
+          <div className="min-w-0">
             <h1 className="text-xl font-bold">{currentNav?.label}</h1>
             <p className="text-xs opacity-70">{en.brand.subtitle}</p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
             <MarketSelectorDropdown value={marketSelection} onChange={setMarketSelection} darkMode={darkMode} />
             <TickerSearchBox
               darkMode={darkMode}
@@ -667,7 +671,7 @@ export const App: React.FC = () => {
                 type="text"
                 value={portfolioAssets}
                 onChange={(e) => setPortfolioAssets(e.target.value)}
-                className={`flex-1 min-w-[260px] rounded border px-3 py-1.5 font-mono text-xs ${panelBg}`}
+                className={`w-full flex-1 sm:w-auto sm:min-w-[260px] rounded border px-3 py-1.5 font-mono text-xs ${panelBg}`}
               />
               <button
                 onClick={runPortfolioOptimization}
