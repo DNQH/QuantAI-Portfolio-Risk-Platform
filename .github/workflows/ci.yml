@@ -63,3 +63,22 @@ jobs:
         run: npm ci
       - name: TypeScript check & production build
         run: npm run build
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t quantai:ci .
+      - name: Smoke test (UI + API on one port)
+        run: |
+          docker run -d --name quantai -p 8000:10000 -e PORT=10000 \
+            -e QUANTAI_ENABLE_YFINANCE_FALLBACK=false quantai:ci
+          for i in $(seq 1 30); do curl -sf http://localhost:8000/api/v1/health && break; sleep 1; done
+          curl -sf http://localhost:8000/api/v1/health
+          curl -sf http://localhost:8000/ | grep -q '<div id="root">'
+      - name: Container logs
+        if: always()
+        run: docker logs quantai || true
