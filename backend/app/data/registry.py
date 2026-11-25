@@ -120,12 +120,6 @@ class MarketDataRegistry:
                         "HOSE": ("XSTC", "Vietnam", "VND", "Asia/Ho_Chi_Minh"),
                         "HNX": ("XHAI", "Vietnam", "VND", "Asia/Ho_Chi_Minh"),
                         "UPCOM": ("XUPC", "Vietnam", "VND", "Asia/Ho_Chi_Minh"),
-                        "LSE": ("XLON", "United Kingdom", "GBP", "Europe/London"),
-                        "XETR": ("XETR", "Germany", "EUR", "Europe/Berlin"),
-                        "TSE": ("XTKS", "Japan", "JPY", "Asia/Tokyo"),
-                        "HKEX": ("XHKG", "Hong Kong", "HKD", "Asia/Hong_Kong"),
-                        "SGX": ("XSES", "Singapore", "SGD", "Asia/Singapore"),
-                        "ASX": ("XASX", "Australia", "AUD", "Australia/Sydney"),
                     }
                     with httpx.Client(timeout=3.0) as client:
                         resp = client.get(
@@ -137,12 +131,9 @@ class MarketDataRegistry:
                                 sym = str(row.get("symbol") or "").strip().upper()
                                 ex_name = str(row.get("exchange") or "").strip().upper()
                                 ctry = str(row.get("country") or "").strip()
-                                if not sym:
-                                    continue
-                                mic, resolved_ctry, ccy, tz = td_mic_map.get(
-                                    ex_name,
-                                    ("XNAS", ctry or "United States", str(row.get("currency") or "USD"), "America/New_York"),
-                                )
+                                if not sym or ex_name not in td_mic_map:
+                                    continue  # unsupported exchange: never relabel it as NASDAQ
+                                mic, resolved_ctry, ccy, tz = td_mic_map[ex_name]
                                 if country and country.lower() not in resolved_ctry.lower():
                                     continue
                                 if exchange and exchange.upper() not in {mic, ex_name}:
@@ -178,12 +169,7 @@ class MarketDataRegistry:
                         "NGM": ("XNAS", "NASDAQ", "United States", "USD", "America/New_York"),
                         "NYQ": ("XNYS", "NYSE", "United States", "USD", "America/New_York"),
                         "PCX": ("XNYS", "NYSE", "United States", "USD", "America/New_York"),
-                        "LSE": ("XLON", "LSE", "United Kingdom", "GBP", "Europe/London"),
-                        "GER": ("XETR", "Xetra", "Germany", "EUR", "Europe/Berlin"),
-                        "JPX": ("XTKS", "TSE", "Japan", "JPY", "Asia/Tokyo"),
-                        "HKG": ("XHKG", "HKEX", "Hong Kong", "HKD", "Asia/Hong_Kong"),
-                        "SES": ("XSES", "SGX", "Singapore", "SGD", "Asia/Singapore"),
-                        "ASX": ("XASX", "ASX", "Australia", "AUD", "Australia/Sydney"),
+                        "MIL": ("XMIL", "Borsa Italiana", "Italy", "EUR", "Europe/Rome"),
                         "HOSE": ("XSTC", "HOSE", "Vietnam", "VND", "Asia/Ho_Chi_Minh"),
                     }
                     with httpx.Client(timeout=3.0, headers={"User-Agent": "Mozilla/5.0"}) as client:
@@ -201,10 +187,10 @@ class MarketDataRegistry:
                                 clean_sym = raw_sym.split(".")[0]
                                 if raw_sym.endswith(".VN"):
                                     mic, acr, ctry, ccy, tz = ("XSTC", "HOSE", "Vietnam", "VND", "Asia/Ho_Chi_Minh")
+                                elif ex_code in yf_ex_map:
+                                    mic, acr, ctry, ccy, tz = yf_ex_map[ex_code]
                                 else:
-                                    mic, acr, ctry, ccy, tz = yf_ex_map.get(
-                                        ex_code, ("XNAS", ex_code or "GLOBAL", "United States", "USD", "America/New_York")
-                                    )
+                                    continue  # exchange not supported by this deployment
                                 if country and country.lower() not in ctry.lower():
                                     continue
                                 if exchange and exchange.upper() not in {mic, acr.upper()}:
@@ -449,10 +435,7 @@ class MarketDataRegistry:
 
         now_utc = datetime.now(timezone.utc)
         sym = ticker.upper().strip()
-        ex_map = {
-            "XNYS": "NYSE", "XNAS": "NASDAQ", "XLON": "LSE", "XETR": "XETR",
-            "XTKS": "TSE", "XHKG": "HKEX", "XSES": "SGX", "XASX": "ASX",
-        }
+        ex_map = {"XNYS": "NYSE", "XNAS": "NASDAQ"}
         params = {
             "symbol": sym,
             "interval": "1day",
@@ -686,57 +669,12 @@ class MarketDataRegistry:
                 notes="LIVE requires SSI FastConnect Data credentials ($0 API fee); historical & delayed quotes active via yfinance/Vnstock.",
             ),
             ExchangeCoverageEntry(
-                exchange_mic="XLON", exchange_acronym="LSE", exchange_name="London Stock Exchange",
-                region="Europe", country="United Kingdom", currency="GBP", timezone="Europe/London",
+                exchange_mic="XMIL", exchange_acronym="Borsa Italiana", exchange_name="Borsa Italiana (Euronext Milan)",
+                region="Europe", country="Italy", currency="EUR", timezone="Europe/Rome",
                 phase="Phase 7", coverage_status=global_cov_status, quote_data_status=global_quote_status,
                 historical_data_status=global_hist_status,
                 primary_provider=global_primary,
-                fallback_provider="yfinance (.L)", requires_credentials=False, requires_paid_plan_for_live=True,
-                notes="Historical & delayed quotes available via yfinance (.L); real-time requires paid EODHD/Twelve Data." + global_note_suffix,
-            ),
-            ExchangeCoverageEntry(
-                exchange_mic="XETR", exchange_acronym="Xetra", exchange_name="Deutsche Börse Xetra",
-                region="Europe", country="Germany", currency="EUR", timezone="Europe/Berlin",
-                phase="Phase 7", coverage_status=global_cov_status, quote_data_status=global_quote_status,
-                historical_data_status=global_hist_status,
-                primary_provider=global_primary,
-                fallback_provider="yfinance (.DE)", requires_credentials=False, requires_paid_plan_for_live=True,
-                notes="Historical & delayed quotes available via yfinance (.DE); real-time requires paid EODHD/Twelve Data." + global_note_suffix,
-            ),
-            ExchangeCoverageEntry(
-                exchange_mic="XTKS", exchange_acronym="TSE", exchange_name="Tokyo Stock Exchange",
-                region="Asia", country="Japan", currency="JPY", timezone="Asia/Tokyo",
-                phase="Phase 7", coverage_status=global_cov_status, quote_data_status=global_quote_status,
-                historical_data_status=global_hist_status,
-                primary_provider=global_primary,
-                fallback_provider="yfinance (.T)", requires_credentials=False, requires_paid_plan_for_live=True,
-                notes="Historical & delayed quotes available via yfinance (.T); real-time requires paid EODHD/Twelve Data." + global_note_suffix,
-            ),
-            ExchangeCoverageEntry(
-                exchange_mic="XHKG", exchange_acronym="HKEX", exchange_name="Hong Kong Exchanges and Clearing",
-                region="Asia", country="Hong Kong", currency="HKD", timezone="Asia/Hong_Kong",
-                phase="Phase 7", coverage_status=global_cov_status, quote_data_status=global_quote_status,
-                historical_data_status=global_hist_status,
-                primary_provider=global_primary,
-                fallback_provider="yfinance (.HK)", requires_credentials=False, requires_paid_plan_for_live=True,
-                notes="Historical & delayed quotes available via yfinance (.HK); real-time requires paid EODHD/Twelve Data." + global_note_suffix,
-            ),
-            ExchangeCoverageEntry(
-                exchange_mic="XSES", exchange_acronym="SGX", exchange_name="Singapore Exchange",
-                region="Southeast Asia", country="Singapore", currency="SGD", timezone="Asia/Singapore",
-                phase="Phase 7", coverage_status=global_cov_status, quote_data_status=global_quote_status,
-                historical_data_status=global_hist_status,
-                primary_provider=global_primary,
-                fallback_provider="yfinance (.SI)", requires_credentials=False, requires_paid_plan_for_live=True,
-                notes="Historical & delayed quotes available via yfinance (.SI); real-time requires paid EODHD/Twelve Data." + global_note_suffix,
-            ),
-            ExchangeCoverageEntry(
-                exchange_mic="XASX", exchange_acronym="ASX", exchange_name="Australian Securities Exchange",
-                region="Oceania", country="Australia", currency="AUD", timezone="Australia/Sydney",
-                phase="Phase 7", coverage_status=global_cov_status, quote_data_status=global_quote_status,
-                historical_data_status=global_hist_status,
-                primary_provider=global_primary,
-                fallback_provider="yfinance (.AX)", requires_credentials=False, requires_paid_plan_for_live=True,
-                notes="Historical & delayed quotes available via yfinance (.AX); real-time requires paid EODHD/Twelve Data." + global_note_suffix,
+                fallback_provider="yfinance (.MI)", requires_credentials=False, requires_paid_plan_for_live=True,
+                notes="Historical & delayed quotes available via yfinance (.MI); real-time requires a paid Euronext Milan feed." + global_note_suffix,
             ),
         ]

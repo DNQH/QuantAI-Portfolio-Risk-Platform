@@ -60,6 +60,20 @@ VN_HOLIDAYS_2026: FrozenSet[date] = frozenset(
     }
 )
 
+# Borsa Italiana / Euronext Milan trading calendar (weekday closures; 15 Aug and 26 Dec fall on
+# a Saturday in 2026).
+IT_HOLIDAYS_2026: FrozenSet[date] = frozenset(
+    {
+        date(2026, 1, 1),   # New Year's Day
+        date(2026, 4, 3),   # Good Friday
+        date(2026, 4, 6),   # Easter Monday
+        date(2026, 5, 1),   # Labour Day
+        date(2026, 12, 24), # Christmas Eve
+        date(2026, 12, 25), # Christmas Day
+        date(2026, 12, 31), # New Year's Eve
+    }
+)
+
 EXCHANGE_SCHEDULES: Dict[str, ExchangeSchedule] = {
     "XNYS": ExchangeSchedule(
         mic="XNYS",
@@ -110,6 +124,15 @@ EXCHANGE_SCHEDULES: Dict[str, ExchangeSchedule] = {
         lunch_end=time(13, 0),
         regular_close=time(15, 0),
         holidays_2026=VN_HOLIDAYS_2026,
+    ),
+    "XMIL": ExchangeSchedule(
+        mic="XMIL",
+        acronym="Borsa Italiana",
+        timezone_name="Europe/Rome",
+        pre_market_open=time(8, 0),   # opening auction (pre-auction phase)
+        regular_open=time(9, 0),      # continuous trading
+        regular_close=time(17, 30),
+        holidays_2026=IT_HOLIDAYS_2026,
     ),
 }
 

@@ -25,9 +25,7 @@ EDUCATIONAL_WARNING = (
 CURRENCY_BY_MIC: Dict[str, str] = {
     "XNYS": "USD", "XNAS": "USD",
     "XSTC": "VND", "XHAI": "VND", "XUPC": "VND",
-    "XLON": "GBP", "XETR": "EUR", "XPAR": "EUR", "XSWX": "CHF", "XMIL": "EUR",
-    "XTKS": "JPY", "XHKG": "HKD", "XKRX": "KRW",
-    "XSES": "SGD", "XKLS": "MYR", "XIDX": "IDR", "XBKK": "THB", "XASX": "AUD",
+    "XMIL": "EUR",
 }
 
 INTRADAY_MAX_PERIOD: Dict[str, str] = {

@@ -162,7 +162,7 @@ class TestQuantAIV2Features(unittest.TestCase):
     def test_v3_ten_iconic_per_exchange_and_10y_simulation(self) -> None:
         from app.portfolio.simulator import PortfolioSimulationRequest, run_portfolio_10y_simulation
 
-        for mic in ("XNYS", "XNAS", "XSTC", "XHAI", "XUPC", "XLON", "XETR", "XTKS", "XHKG", "XSES", "XASX"):
+        for mic in ("XNYS", "XNAS", "XSTC", "XHAI", "XUPC", "XMIL"):
             items = search_seed_instruments(exchange=mic)
             self.assertGreaterEqual(len(items), 10, f"Exchange {mic} has fewer than 10 iconic stocks")
 

@@ -277,10 +277,10 @@ def build_risk_tracker_report(
     mf = market_filter.strip()
     if mf.upper() == "ALL" or not mf:
         pool = list(GLOBAL_INSTRUMENTS)
-    elif mf.lower() == "europe":
-        pool = [i for i in GLOBAL_INSTRUMENTS if i.country in {"United Kingdom", "Germany", "France", "Switzerland", "Italy"}]
-    elif mf.lower() in {"asia", "asia-pacific"}:
-        pool = [i for i in GLOBAL_INSTRUMENTS if i.country in {"Japan", "Hong Kong", "South Korea", "Singapore", "Indonesia", "Thailand", "Australia", "Vietnam"}]
+    elif mf.lower() == "europe":  # Italy is the only European market covered
+        pool = [i for i in GLOBAL_INSTRUMENTS if i.country == "Italy"]
+    elif mf.lower() in {"asia", "asia-pacific"}:  # Vietnam is the only Asian market covered
+        pool = [i for i in GLOBAL_INSTRUMENTS if i.country == "Vietnam"]
     else:
         pool = [i for i in GLOBAL_INSTRUMENTS if mf.lower() in i.country.lower()]
 

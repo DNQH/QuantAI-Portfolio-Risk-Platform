@@ -6,7 +6,7 @@ interface Props {
   onInspectStockRisk: (instrumentId: string) => void;
 }
 
-const MARKET_SCOPES = ['ALL', 'United States', 'Vietnam', 'Europe', 'Asia-Pacific'] as const;
+const MARKET_SCOPES = ['ALL', 'United States', 'Vietnam', 'Italy'] as const;
 
 const TIER_STYLE: Record<string, string> = {
   SEVERE: 'bg-rose-500/20 text-rose-300 border-rose-500/40',

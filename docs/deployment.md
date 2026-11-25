@@ -34,7 +34,7 @@ applied per real visitor IP.
    | `EODHD_API_KEY` | Reserved for a future paid real-time adapter; currently unused |
    | `SSI_CONSUMER_ID` + `SSI_CONSUMER_SECRET` | **LIVE** status for HOSE / HNX / UPCOM (SSI trading account + FastConnect Data registration) |
 
-   LSE, Xetra, TSE, HKEX, SGX and ASX always show **DELAYED**: their quotes come from yfinance,
+   Borsa Italiana (Italy) always shows **DELAYED**: its quotes come from yfinance,
    and the badge only says LIVE when the app really has a real-time quote source.
 
    Keys can also be added or changed later under the service's **Environment** tab

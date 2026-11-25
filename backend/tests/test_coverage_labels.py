@@ -6,7 +6,7 @@ from app.core.config import Settings
 from app.core.models import CoverageStatus, DataStatus
 from app.data.registry import MarketDataRegistry
 
-GLOBAL = {"XLON", "XETR", "XTKS", "XHKG", "XSES", "XASX"}
+GLOBAL = {"XMIL"}  # Italy: the only non-US, non-Vietnam market
 
 
 class _YFReady:

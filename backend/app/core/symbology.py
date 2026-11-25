@@ -1,6 +1,7 @@
 """ISO 10383 MIC registry and effective-dated exchange/ticker mapping (v3.0.0).
 
-Includes 10 iconic flagship stocks per major exchange across all 11 GICS sectors:
+Supported markets: United States (NYSE, NASDAQ), Vietnam (HOSE, HNX, UPCOM) and Italy
+(Borsa Italiana / Euronext Milan), with flagship stocks across the GICS sectors:
   - Technology, Financial Services, Healthcare, Consumer Defensive, Consumer Cyclical,
     Energy, Industrials, Basic Materials, Utilities, Real Estate, Communication Services.
 """
@@ -51,19 +52,7 @@ MIC_TO_ACRONYM: Dict[str, str] = {
     "XSTC": "HOSE",
     "XHAI": "HNX",
     "XUPC": "UPCOM",
-    "XLON": "LSE",
-    "XETR": "Xetra",
-    "XPAR": "Euronext",
-    "XSWX": "SIX",
     "XMIL": "Borsa Italiana",
-    "XTKS": "TSE",
-    "XHKG": "HKEX",
-    "XKRX": "KRX",
-    "XSES": "SGX",
-    "XKLS": "Bursa Malaysia",
-    "XIDX": "IDX",
-    "XBKK": "SET",
-    "XASX": "ASX",
 }
 
 YFINANCE_SUFFIX_BY_MIC: Dict[str, str] = {
@@ -72,19 +61,7 @@ YFINANCE_SUFFIX_BY_MIC: Dict[str, str] = {
     "XSTC": ".VN",
     "XHAI": ".VN",
     "XUPC": ".VN",
-    "XLON": ".L",
-    "XETR": ".DE",
-    "XPAR": ".PA",
-    "XSWX": ".SW",
     "XMIL": ".MI",
-    "XTKS": ".T",
-    "XHKG": ".HK",
-    "XKRX": ".KS",
-    "XSES": ".SI",
-    "XKLS": ".KL",
-    "XIDX": ".JK",
-    "XBKK": ".BK",
-    "XASX": ".AX",
 }
 
 
@@ -206,85 +183,26 @@ GLOBAL_INSTRUMENTS: List[Instrument] = [
     _vn_upcom("MVN", "Vietnam Maritime Corporation (VIMC)", "Industrials"),
     _vn_upcom("PHP", "Port of Hai Phong JSC", "Industrials"),
 
-    # --- United Kingdom: LSE (10 Iconic) ---
-    _inst("XLON", "HSBA", "HSBC Holdings plc", "United Kingdom", "GBP", "Financial Services", "Europe/London"),
-    _inst("XLON", "SHEL", "Shell plc", "United Kingdom", "GBP", "Energy", "Europe/London"),
-    _inst("XLON", "AZN", "AstraZeneca PLC", "United Kingdom", "GBP", "Healthcare", "Europe/London"),
-    _inst("XLON", "ULVR", "Unilever PLC", "United Kingdom", "GBP", "Consumer Defensive", "Europe/London"),
-    _inst("XLON", "BP", "BP p.l.c.", "United Kingdom", "GBP", "Energy", "Europe/London"),
-    _inst("XLON", "GSK", "GSK plc", "United Kingdom", "GBP", "Healthcare", "Europe/London"),
-    _inst("XLON", "RIO", "Rio Tinto Group", "United Kingdom", "GBP", "Basic Materials", "Europe/London"),
-    _inst("XLON", "DGE", "Diageo plc", "United Kingdom", "GBP", "Consumer Defensive", "Europe/London"),
-    _inst("XLON", "BARC", "Barclays PLC", "United Kingdom", "GBP", "Financial Services", "Europe/London"),
-    _inst("XLON", "NG", "National Grid plc", "United Kingdom", "GBP", "Utilities", "Europe/London"),
-
-    # --- Germany: Xetra (10 Iconic) ---
-    _inst("XETR", "SAP", "SAP SE", "Germany", "EUR", "Technology", "Europe/Berlin"),
-    _inst("XETR", "SIE", "Siemens AG", "Germany", "EUR", "Industrials", "Europe/Berlin"),
-    _inst("XETR", "ALV", "Allianz SE", "Germany", "EUR", "Financial Services", "Europe/Berlin"),
-    _inst("XETR", "DTE", "Deutsche Telekom AG", "Germany", "EUR", "Communication Services", "Europe/Berlin"),
-    _inst("XETR", "MBG", "Mercedes-Benz Group AG", "Germany", "EUR", "Consumer Cyclical", "Europe/Berlin"),
-    _inst("XETR", "BMW", "Bayerische Motoren Werke AG", "Germany", "EUR", "Consumer Cyclical", "Europe/Berlin"),
-    _inst("XETR", "BAS", "BASF SE", "Germany", "EUR", "Basic Materials", "Europe/Berlin"),
-    _inst("XETR", "ADS", "adidas AG", "Germany", "EUR", "Consumer Cyclical", "Europe/Berlin"),
-    _inst("XETR", "MUV2", "Munich Re", "Germany", "EUR", "Financial Services", "Europe/Berlin"),
-    _inst("XETR", "IFX", "Infineon Technologies AG", "Germany", "EUR", "Technology", "Europe/Berlin"),
-
-    # --- Japan: TSE (10 Iconic) ---
-    _inst("XTKS", "7203", "Toyota Motor Corporation", "Japan", "JPY", "Consumer Cyclical", "Asia/Tokyo"),
-    _inst("XTKS", "6758", "Sony Group Corporation", "Japan", "JPY", "Technology", "Asia/Tokyo"),
-    _inst("XTKS", "9984", "SoftBank Group Corp.", "Japan", "JPY", "Communication Services", "Asia/Tokyo"),
-    _inst("XTKS", "8306", "Mitsubishi UFJ Financial Group", "Japan", "JPY", "Financial Services", "Asia/Tokyo"),
-    _inst("XTKS", "6861", "Keyence Corporation", "Japan", "JPY", "Technology", "Asia/Tokyo"),
-    _inst("XTKS", "7974", "Nintendo Co., Ltd.", "Japan", "JPY", "Communication Services", "Asia/Tokyo"),
-    _inst("XTKS", "9432", "Nippon Telegraph and Telephone", "Japan", "JPY", "Communication Services", "Asia/Tokyo"),
-    _inst("XTKS", "8035", "Tokyo Electron Limited", "Japan", "JPY", "Technology", "Asia/Tokyo"),
-    _inst("XTKS", "4502", "Takeda Pharmaceutical Company", "Japan", "JPY", "Healthcare", "Asia/Tokyo"),
-    _inst("XTKS", "6501", "Hitachi, Ltd.", "Japan", "JPY", "Industrials", "Asia/Tokyo"),
-
-    # --- Hong Kong: HKEX (10 Iconic) ---
-    _inst("XHKG", "0700", "Tencent Holdings Limited", "Hong Kong", "HKD", "Communication Services", "Asia/Hong_Kong"),
-    _inst("XHKG", "9988", "Alibaba Group Holding Limited", "Hong Kong", "HKD", "Consumer Cyclical", "Asia/Hong_Kong"),
-    _inst("XHKG", "3690", "Meituan", "Hong Kong", "HKD", "Consumer Cyclical", "Asia/Hong_Kong"),
-    _inst("XHKG", "0939", "China Construction Bank Corp", "Hong Kong", "HKD", "Financial Services", "Asia/Hong_Kong"),
-    _inst("XHKG", "1299", "AIA Group Limited", "Hong Kong", "HKD", "Financial Services", "Asia/Hong_Kong"),
-    _inst("XHKG", "0005", "HSBC Holdings plc (HK)", "Hong Kong", "HKD", "Financial Services", "Asia/Hong_Kong"),
-    _inst("XHKG", "0941", "China Mobile Limited", "Hong Kong", "HKD", "Communication Services", "Asia/Hong_Kong"),
-    _inst("XHKG", "1211", "BYD Company Limited", "Hong Kong", "HKD", "Consumer Cyclical", "Asia/Hong_Kong"),
-    _inst("XHKG", "0388", "Hong Kong Exchanges and Clearing", "Hong Kong", "HKD", "Financial Services", "Asia/Hong_Kong"),
-    _inst("XHKG", "0883", "CNOOC Limited", "Hong Kong", "HKD", "Energy", "Asia/Hong_Kong"),
-
-    # --- Singapore: SGX (10 Iconic) ---
-    _inst("XSES", "D05", "DBS Group Holdings Ltd", "Singapore", "SGD", "Financial Services", "Asia/Singapore"),
-    _inst("XSES", "O39", "Oversea-Chinese Banking Corp", "Singapore", "SGD", "Financial Services", "Asia/Singapore"),
-    _inst("XSES", "U11", "United Overseas Bank Limited", "Singapore", "SGD", "Financial Services", "Asia/Singapore"),
-    _inst("XSES", "Z74", "Singapore Telecommunications", "Singapore", "SGD", "Communication Services", "Asia/Singapore"),
-    _inst("XSES", "C6L", "Singapore Airlines Limited", "Singapore", "SGD", "Industrials", "Asia/Singapore"),
-    _inst("XSES", "BN4", "Keppel Ltd.", "Singapore", "SGD", "Industrials", "Asia/Singapore"),
-    _inst("XSES", "F34", "Wilmar International Limited", "Singapore", "SGD", "Consumer Defensive", "Asia/Singapore"),
-    _inst("XSES", "C38U", "CapitaLand Integrated Commercial Trust", "Singapore", "SGD", "Real Estate", "Asia/Singapore"),
-    _inst("XSES", "A17U", "CapitaLand Ascendas REIT", "Singapore", "SGD", "Real Estate", "Asia/Singapore"),
-    _inst("XSES", "S68", "Singapore Exchange Limited", "Singapore", "SGD", "Financial Services", "Asia/Singapore"),
-
-    # --- Australia: ASX (10 Iconic) ---
-    _inst("XASX", "BHP", "BHP Group Limited", "Australia", "AUD", "Basic Materials", "Australia/Sydney"),
-    _inst("XASX", "CBA", "Commonwealth Bank of Australia", "Australia", "AUD", "Financial Services", "Australia/Sydney"),
-    _inst("XASX", "CSL", "CSL Limited", "Australia", "AUD", "Healthcare", "Australia/Sydney"),
-    _inst("XASX", "NAB", "National Australia Bank", "Australia", "AUD", "Financial Services", "Australia/Sydney"),
-    _inst("XASX", "WBC", "Westpac Banking Corporation", "Australia", "AUD", "Financial Services", "Australia/Sydney"),
-    _inst("XASX", "ANZ", "ANZ Group Holdings Limited", "Australia", "AUD", "Financial Services", "Australia/Sydney"),
-    _inst("XASX", "FMG", "Fortescue Ltd", "Australia", "AUD", "Basic Materials", "Australia/Sydney"),
-    _inst("XASX", "WDS", "Woodside Energy Group Ltd", "Australia", "AUD", "Energy", "Australia/Sydney"),
-    _inst("XASX", "WES", "Wesfarmers Limited", "Australia", "AUD", "Consumer Cyclical", "Australia/Sydney"),
-    _inst("XASX", "MQG", "Macquarie Group Limited", "Australia", "AUD", "Financial Services", "Australia/Sydney"),
-
-    # --- Additional Europe & Asia ---
-    _inst("XPAR", "MC", "LVMH Moet Hennessy Louis Vuitton", "France", "EUR", "Consumer Cyclical", "Europe/Paris"),
-    _inst("XSWX", "NESN", "Nestle S.A.", "Switzerland", "CHF", "Consumer Defensive", "Europe/Zurich"),
+    # --- Italy: Borsa Italiana / Euronext Milan (FTSE MIB leaders) ---
     _inst("XMIL", "ENEL", "Enel S.p.A.", "Italy", "EUR", "Utilities", "Europe/Rome"),
-    _inst("XKRX", "005930", "Samsung Electronics Co., Ltd.", "South Korea", "KRW", "Technology", "Asia/Seoul"),
-    _inst("XIDX", "BBCA", "PT Bank Central Asia Tbk", "Indonesia", "IDR", "Financial Services", "Asia/Jakarta"),
-    _inst("XBKK", "PTT", "PTT Public Company Limited", "Thailand", "THB", "Energy", "Asia/Bangkok"),
+    _inst("XMIL", "SRG", "Snam S.p.A.", "Italy", "EUR", "Utilities", "Europe/Rome"),
+    _inst("XMIL", "ENI", "Eni S.p.A.", "Italy", "EUR", "Energy", "Europe/Rome"),
+    _inst("XMIL", "TEN", "Tenaris S.A.", "Italy", "EUR", "Energy", "Europe/Rome"),
+    _inst("XMIL", "ISP", "Intesa Sanpaolo S.p.A.", "Italy", "EUR", "Financial Services", "Europe/Rome"),
+    _inst("XMIL", "UCG", "UniCredit S.p.A.", "Italy", "EUR", "Financial Services", "Europe/Rome"),
+    _inst("XMIL", "G", "Assicurazioni Generali S.p.A.", "Italy", "EUR", "Financial Services", "Europe/Rome"),
+    _inst("XMIL", "RACE", "Ferrari N.V.", "Italy", "EUR", "Consumer Cyclical", "Europe/Rome"),
+    _inst("XMIL", "STLAM", "Stellantis N.V.", "Italy", "EUR", "Consumer Cyclical", "Europe/Rome"),
+    _inst("XMIL", "MONC", "Moncler S.p.A.", "Italy", "EUR", "Consumer Cyclical", "Europe/Rome"),
+    _inst("XMIL", "CPR", "Davide Campari-Milano N.V.", "Italy", "EUR", "Consumer Defensive", "Europe/Rome"),
+    _inst("XMIL", "PRY", "Prysmian S.p.A.", "Italy", "EUR", "Industrials", "Europe/Rome"),
+    _inst("XMIL", "LDO", "Leonardo S.p.A.", "Italy", "EUR", "Industrials", "Europe/Rome"),
+    _inst("XMIL", "REC", "Recordati S.p.A.", "Italy", "EUR", "Healthcare", "Europe/Rome"),
+    _inst("XMIL", "DIA", "DiaSorin S.p.A.", "Italy", "EUR", "Healthcare", "Europe/Rome"),
+    _inst("XMIL", "STMMI", "STMicroelectronics N.V.", "Italy", "EUR", "Technology", "Europe/Rome"),
+    _inst("XMIL", "NEXI", "Nexi S.p.A.", "Italy", "EUR", "Technology", "Europe/Rome"),
+    _inst("XMIL", "TIT", "Telecom Italia S.p.A.", "Italy", "EUR", "Communication Services", "Europe/Rome"),
+    _inst("XMIL", "BZU", "Buzzi S.p.A.", "Italy", "EUR", "Basic Materials", "Europe/Rome"),
 ]
 
 PHASE1_INSTRUMENTS = GLOBAL_INSTRUMENTS

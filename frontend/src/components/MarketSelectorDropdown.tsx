@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 
 export interface MarketSelection {
   country: string; // 'ALL' or country name
-  exchangeMic: string; // 'ALL' or specific MIC e.g. 'XNYS', 'XNAS', 'XSTC', 'XHAI', 'XUPC'
+  exchangeMic: string; // 'ALL' or specific MIC: 'XNYS', 'XNAS', 'XSTC', 'XHAI', 'XUPC', 'XMIL'
   label: string;
 }
 
@@ -37,64 +37,9 @@ export const COUNTRY_EXCHANGE_TREE: CountryGroup[] = [
     ],
   },
   {
-    country: 'United Kingdom',
-    label: 'United Kingdom',
-    exchanges: [{ mic: 'XLON', code: 'LSE', name: 'London Stock Exchange' }],
-  },
-  {
-    country: 'Germany',
-    label: 'Germany',
-    exchanges: [{ mic: 'XETR', code: 'Xetra', name: 'Deutsche Börse Xetra' }],
-  },
-  {
-    country: 'France',
-    label: 'France',
-    exchanges: [{ mic: 'XPAR', code: 'Euronext', name: 'Euronext Paris' }],
-  },
-  {
-    country: 'Switzerland',
-    label: 'Switzerland',
-    exchanges: [{ mic: 'XSWX', code: 'SIX', name: 'SIX Swiss Exchange' }],
-  },
-  {
     country: 'Italy',
     label: 'Italy',
-    exchanges: [{ mic: 'XMIL', code: 'Borsa Italiana', name: 'Borsa Italiana' }],
-  },
-  {
-    country: 'Japan',
-    label: 'Japan',
-    exchanges: [{ mic: 'XTKS', code: 'TSE', name: 'Tokyo Stock Exchange' }],
-  },
-  {
-    country: 'Hong Kong',
-    label: 'Hong Kong',
-    exchanges: [{ mic: 'XHKG', code: 'HKEX', name: 'Hong Kong Exchanges' }],
-  },
-  {
-    country: 'South Korea',
-    label: 'South Korea',
-    exchanges: [{ mic: 'XKRX', code: 'KRX', name: 'Korea Exchange' }],
-  },
-  {
-    country: 'Singapore',
-    label: 'Singapore',
-    exchanges: [{ mic: 'XSES', code: 'SGX', name: 'Singapore Exchange' }],
-  },
-  {
-    country: 'Indonesia',
-    label: 'Indonesia',
-    exchanges: [{ mic: 'XIDX', code: 'IDX', name: 'Indonesia Stock Exchange' }],
-  },
-  {
-    country: 'Thailand',
-    label: 'Thailand',
-    exchanges: [{ mic: 'XBKK', code: 'SET', name: 'Stock Exchange of Thailand' }],
-  },
-  {
-    country: 'Australia',
-    label: 'Australia',
-    exchanges: [{ mic: 'XASX', code: 'ASX', name: 'Australian Securities Exchange' }],
+    exchanges: [{ mic: 'XMIL', code: 'Borsa Italiana', name: 'Borsa Italiana (Euronext Milan)' }],
   },
 ];
 
