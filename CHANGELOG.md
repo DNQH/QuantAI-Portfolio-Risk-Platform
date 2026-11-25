@@ -2,6 +2,26 @@
 
 All notable changes to **QuantAI** are documented in this file.
 
+## [Unreleased]
+### Fixed
+- **Misleading LIVE badges in Market Data Coverage:** a Twelve Data or EODHD API key alone
+  flipped LSE, Xetra, TSE, HKEX, SGX and ASX to **LIVE** ("Twelve Data (Live Global)"), although
+  quotes for those exchanges are always served by yfinance (delayed) and the paid quote
+  adapters are placeholders. LIVE now requires a configured provider whose real-time quote
+  adapter is implemented (`live_quotes_implemented`); otherwise the row shows
+  `yfinance (Delayed)` and notes that Twelve Data is used only as a historical-bars backup.
+  US (Finnhub) and Vietnam (SSI) labelling is unchanged.
+- **Hermetic tests:** the suite now ignores the developer's `.env` and inherited provider keys
+  (`QUANTAI_DISABLE_DOTENV`), so local API keys can no longer change results or be spent by
+  tests (a real Gemini call previously ran from the assistant test).
+
+### Changed
+- **Market Data Coverage UI:** the "Feed Status" column is now "Best Available Feed", with an
+  explainer that LIVE applies while the exchange is open (other pages show each quote's real
+  age, e.g. `DELAYED (968m)` before the US open); provider notes appear as a tooltip.
+- `render.yaml` / `docs/deployment.md`: `TWELVEDATA_API_KEY` documented as a historical-data
+  backup and `EODHD_API_KEY` as reserved; neither makes non-US markets LIVE.
+
 ## [4.1.0] - 2026-11-25
 Quant-correctness, robustness, UI and public-deployment release. Public API shapes are
 backward compatible (only optional fields were added; `key_prefix` was removed from

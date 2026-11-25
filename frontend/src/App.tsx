@@ -889,13 +889,22 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'coverage' && (
+          <div className="space-y-3">
+          <p className="text-xs opacity-75">
+            <span className="font-semibold">Best Available Feed</span> is the fastest quote source this deployment can
+            use for each exchange. <span className="font-semibold">LIVE</span> means real-time quotes are available{' '}
+            <span className="font-semibold">while the exchange is open</span>; outside trading hours every quote shows
+            its real age (e.g. <span className="font-mono">DELAYED (968m)</span>) on the other pages.
+          </p>
           <div className={`overflow-x-auto rounded-lg border ${panelBg}`}>
             <table className="w-full text-left text-xs">
               <thead className="border-b border-terminal-border font-mono opacity-70">
                 <tr>
                   <th className="p-3">Exchange</th>
                   <th className="p-3">Country / Currency</th>
-                  <th className="p-3">Feed Status</th>
+                  <th className="p-3" title="Fastest quote source configured for this exchange. LIVE applies while the exchange is open.">
+                    Best Available Feed
+                  </th>
                   <th className="p-3">Data Provider</th>
                 </tr>
               </thead>
@@ -905,11 +914,12 @@ export const App: React.FC = () => {
                     <td className="p-3 font-semibold">{row.exchange_acronym} <span className="opacity-60 font-normal">· {row.exchange_name}</span></td>
                     <td className="p-3">{row.country} · {row.currency}</td>
                     <td className="p-3"><StatusBadge status={row.quote_data_status} /></td>
-                    <td className="p-3 opacity-85">{row.primary_provider}</td>
+                    <td className="p-3 opacity-85" title={row.notes ?? undefined}>{row.primary_provider}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
           </div>
         )}
       </main>

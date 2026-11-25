@@ -16,17 +16,26 @@ from typing import Optional
 from app import __version__
 
 
-def _load_env_files() -> None:
+def _truthy(raw: Optional[str]) -> bool:
+    return (raw or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _load_env_files(candidates: Optional[list[Path]] = None) -> None:
+    """Apply .env files. ``candidates`` overrides the default search paths (used by tests)."""
+    # Test suites set this so a developer's real .env (API keys) never leaks into tests.
+    if candidates is None and _truthy(os.getenv("QUANTAI_DISABLE_DOTENV")):
+        return
     try:
         from dotenv import dotenv_values
     except ImportError:
         return
 
-    candidates = [
-        Path(__file__).resolve().parents[3] / ".env",
-        Path.cwd().parent / ".env",
-        Path.cwd() / ".env",
-    ]
+    if candidates is None:
+        candidates = [
+            Path(__file__).resolve().parents[3] / ".env",
+            Path.cwd().parent / ".env",
+            Path.cwd() / ".env",
+        ]
     seen = set()
     for path in candidates:
         resolved = path.resolve()

@@ -16,6 +16,11 @@ from app.data.base import BaseMarketDataProvider, ProviderCapabilities
 
 
 class _PaidProviderStub(BaseMarketDataProvider):
+    # The quote adapters below are placeholders that always return DATA_UNAVAILABLE.
+    # Flip this to True only once get_quote() really returns exchange real-time prices;
+    # the coverage table uses it so an API key alone never produces a LIVE badge.
+    live_quotes_implemented: bool = False
+
     def __init__(self, api_key: Optional[str]) -> None:
         self._api_key = api_key
 
