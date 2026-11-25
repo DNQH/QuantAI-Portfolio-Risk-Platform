@@ -468,7 +468,8 @@ def test_env_file_does_not_override_real_environment(tmp_path, monkeypatch) -> N
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("QUANTAI_TEST_PRECEDENCE", "from-env")
     monkeypatch.delenv("QUANTAI_TEST_UNSET", raising=False)
-    cfg._load_env_files()
+    # Explicit candidates: exercise the precedence logic without reading the developer's .env.
+    cfg._load_env_files(candidates=[tmp_path / ".env"])
     import os
 
     assert os.environ["QUANTAI_TEST_PRECEDENCE"] == "from-env"
