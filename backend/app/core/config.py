@@ -1,7 +1,9 @@
-"""Environment-based configuration for QuantAI v1.5.0.
+"""Environment-based configuration for QuantAI.
 
-Loads .env reliably from repository root or current working directory with
-override=True so non-empty values appended to .env always take effect.
+Loads .env from the repository root or current working directory. Precedence:
+a NON-EMPTY real process environment variable always wins (so container / CI /
+systemd configuration cannot be silently overridden by a stale .env file); a .env
+value is applied when the variable is unset or set to an empty string.
 """
 
 from __future__ import annotations
@@ -10,6 +12,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+from app import __version__
 
 
 def _load_env_files() -> None:
@@ -31,8 +35,11 @@ def _load_env_files() -> None:
         seen.add(resolved)
         vals = dotenv_values(path)
         for k, v in vals.items():
-            if v is not None and str(v).strip() != "":
-                os.environ[k] = str(v).strip()
+            if v is None or str(v).strip() == "":
+                continue
+            if (os.environ.get(k) or "").strip():
+                continue  # real environment takes precedence over .env
+            os.environ[k] = str(v).strip()
 
 
 _load_env_files()
@@ -48,7 +55,7 @@ def _env_bool(name: str, default: bool = False) -> bool:
 @dataclass(frozen=True)
 class Settings:
     app_name: str = "QuantAI"
-    app_version: str = "1.5.0"
+    app_version: str = __version__
     environment: str = field(default_factory=lambda: os.getenv("QUANTAI_ENV", "development"))
     database_path: str = field(
         default_factory=lambda: os.getenv(
@@ -86,7 +93,11 @@ class Settings:
 
     @property
     def cors_origin_list(self) -> list[str]:
-        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        return [o.strip().rstrip("/") for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def cors_allows_any_origin(self) -> bool:
+        return "*" in self.cors_origin_list
 
 
 def get_settings() -> Settings:

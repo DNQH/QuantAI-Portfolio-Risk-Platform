@@ -12,12 +12,23 @@ from __future__ import annotations
 import math
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Literal, Optional, Tuple
 
+import numpy as np
 from pydantic import BaseModel, Field
+from scipy.optimize import minimize
 
+from app.analytics.bars import adjusted_closes, prepare_bars
 from app.analytics.indicators import macd, rate_of_change, rsi_wilder, sma
-from app.analytics.returns import annualized_return, drawdown_analysis, rolling_volatility, sharpe_ratio, simple_returns
+from app.analytics.returns import (
+    annualized_return,
+    drawdown_analysis,
+    infer_periods_per_year,
+    rolling_volatility,
+    sharpe_ratio,
+    simple_returns,
+)
+from app.analytics.statistics import ledoit_wolf_covariance
 from app.core.models import OHLCVBar
 
 
@@ -94,8 +105,8 @@ class BacktestResponse(BaseModel):
 
 
 def evaluate_quantitative_signals(instrument_id: str, bars: List[OHLCVBar]) -> SignalsResponse:
-    ordered = sorted(bars, key=lambda b: b.timestamp)
-    closes = [b.adjusted_close if b.adjusted_close is not None else b.close for b in ordered]
+    ordered, _ = prepare_bars(bars, min_count=2, context="Signal evaluation")
+    closes = adjusted_closes(ordered)
 
     rsi14 = rsi_wilder(closes, 14)[-1]
     macd_out = macd(closes, 12, 26, 9)
@@ -216,9 +227,9 @@ def compute_strategy_target_positions(
 
 
 def run_backtest(req: BacktestRequest) -> BacktestResponse:
-    ordered = sorted(req.bars, key=lambda b: b.timestamp)
+    ordered, data_warnings = prepare_bars(req.bars, min_count=25, context="Backtest")
     timestamps = [b.timestamp.isoformat() for b in ordered]
-    closes = [b.adjusted_close if b.adjusted_close is not None else b.close for b in ordered]
+    closes = adjusted_closes(ordered)
     n = len(closes)
 
     signals = compute_strategy_target_positions(
@@ -231,7 +242,6 @@ def run_backtest(req: BacktestRequest) -> BacktestResponse:
         rsi_overbought=req.rsi_overbought,
     )
 
-    cost_rate = (req.commission_bps + req.slippage_bps) / 10000.0
     cash = req.initial_capital
     shares = 0.0
     total_costs = 0.0
@@ -283,10 +293,13 @@ def run_backtest(req: BacktestRequest) -> BacktestResponse:
 
         equity_curve.append(round(cash + shares * px, 4))
 
-    # Buy-and-Hold benchmark over identical window (with single entry fee/slippage)
-    bh_start_cost = req.initial_capital * cost_rate
-    bh_shares = (req.initial_capital - bh_start_cost) / closes[0]
-    benchmark_curve = [round(bh_shares * p, 4) for p in closes]
+    # Buy-and-Hold benchmark under the IDENTICAL execution model: a signal formed at the
+    # close of bar 0 can only be filled at bar 1 (T+1), paying the same commission and
+    # slippage as the strategy. (Previously the benchmark was filled at bar 0, one bar
+    # earlier than any strategy could trade, which biased the comparison.)
+    bh_exec_px = closes[1] * (1.0 + req.slippage_bps / 10000.0)
+    bh_shares = req.initial_capital * (1.0 - req.commission_bps / 10000.0) / bh_exec_px
+    benchmark_curve = [round(req.initial_capital, 4)] + [round(bh_shares * p, 4) for p in closes[1:]]
 
     final_val = equity_curve[-1]
     total_ret = (final_val - req.initial_capital) / req.initial_capital
@@ -323,8 +336,10 @@ def run_backtest(req: BacktestRequest) -> BacktestResponse:
             "Strict T+1 execution: signals computed from bar t-1 close execute at bar t to eliminate look-ahead bias.",
             f"Transaction costs: {req.commission_bps:.1f} bps commission + {req.slippage_bps:.1f} bps slippage per turnover.",
             "Long-only fully invested / cash allocation without leverage or short-selling margin assumptions.",
+            "Buy-and-Hold benchmark is filled at bar 1 under the same T+1 execution and cost model as the strategy.",
             "Historical backtest results are hypothetical simulations and do NOT guarantee future returns.",
-        ],
+        ]
+        + data_warnings,
     )
 
 
@@ -375,61 +390,101 @@ class PortfolioBacktestResponse(BaseModel):
     benchmark_curve: List[float]
     calendar_year_returns: List[CalendarYearReturn]
     assumptions: List[str]
+    # v4.1 additions (backward compatible)
+    periods_per_year: float = 252.0
+    warmup_observations: int = 0
+    asset_annualized_volatility: Dict[str, float] = Field(default_factory=dict)
+
+
+ESTIMATION_LOOKBACK = 252  # trailing return observations used for each weight estimate
+MIN_ESTIMATION_OBS = 30
 
 
 def _compute_portfolio_weights(
-    returns_matrix: "np.ndarray", method: str, rf_annual: float
-) -> "np.ndarray":
-    import numpy as np
-    from scipy.optimize import minimize
+    returns_matrix: np.ndarray, method: str, rf_annual: float, periods_per_year: float = 252.0
+) -> Tuple[np.ndarray, bool]:
+    """Estimate long-only weights (2%..60% per asset) from PAST returns only.
 
+    Returns (weights, converged). Falls back to equal weight when the estimation window
+    is too short or the optimiser fails.
+    """
     n = returns_matrix.shape[1]
     eq = np.full(n, 1.0 / n)
-    if method == "equal_weight" or returns_matrix.shape[0] < 30:
-        return eq
+    if method == "equal_weight":
+        return eq, True
+    if returns_matrix.shape[0] < MIN_ESTIMATION_OBS:
+        return eq, False
 
-    cov = np.cov(returns_matrix, rowvar=False) * 252.0
-    if cov.ndim == 0:
-        return eq
-    cov = cov + np.eye(n) * 1e-6
-    mu = np.mean(returns_matrix, axis=0) * 252.0
-    bounds = tuple((0.02, 0.60) for _ in range(n))
+    cov = np.cov(returns_matrix, rowvar=False, ddof=1).reshape(n, n)
+    try:
+        ill = (not np.all(np.isfinite(cov))) or float(np.linalg.cond(cov)) > 1e8
+    except np.linalg.LinAlgError:
+        ill = True
+    if ill:
+        cov, _ = ledoit_wolf_covariance(returns_matrix)
+    cov = cov * periods_per_year + np.eye(n) * 1e-10
+    mu = np.mean(returns_matrix, axis=0) * periods_per_year
+    lo, hi = (0.02, 0.60) if n * 0.60 >= 1.0 else (0.0, 1.0)
+    bounds = tuple((lo, hi) for _ in range(n))
     constraints = ({"type": "eq", "fun": lambda w: float(np.sum(w) - 1.0)},)
 
     if method == "min_variance":
-        res = minimize(lambda w: float(w @ cov @ w), eq, method="SLSQP", bounds=bounds, constraints=constraints)
-        return res.x if res.success else eq
-
-    if method == "max_sharpe":
-        def neg_sr(w):
+        res = minimize(lambda w: float(w @ cov @ w), eq, jac=lambda w: 2.0 * (cov @ w), method="SLSQP", bounds=bounds, constraints=constraints)
+    elif method == "max_sharpe":
+        def neg_sr(w: np.ndarray) -> float:
             vol = math.sqrt(max(float(w @ cov @ w), 1e-12))
             return -(float(w @ mu) - rf_annual) / vol
-        res = minimize(neg_sr, eq, method="SLSQP", bounds=bounds, constraints=constraints)
-        return res.x if res.success else eq
 
-    return eq
+        res = minimize(neg_sr, eq, method="SLSQP", bounds=bounds, constraints=constraints)
+    else:
+        return eq, True
+    if not res.success:
+        return eq, False
+    w = np.clip(res.x, lo, hi)
+    return w / np.sum(w), True
+
+
+def _period_key(d: str, frequency: str) -> Tuple[int, int]:
+    year, month = int(d[:4]), int(d[5:7])
+    if frequency == "quarterly":
+        return year, (month - 1) // 3
+    if frequency == "annually":
+        return year, 0
+    return 0, 0  # buy_and_hold: never changes
 
 
 def run_portfolio_backtest(req: PortfolioBacktestRequest) -> PortfolioBacktestResponse:
-    import numpy as np
+    """Multi-asset portfolio backtest without look-ahead.
 
+    * Weights for optimised methods are estimated walk-forward: at every formation /
+      rebalance date only returns strictly up to that close are used (trailing 252 obs).
+    * Optimised methods reserve an initial warm-up window purely for estimation; the
+      evaluation (equity curve, benchmark, metrics) starts after it.
+    * Rebalancing is calendar-based (first trading day of each new quarter / year).
+    * Transaction costs are charged on the full traded notional (buys + sells),
+      including the initial purchase, for both the strategy and the benchmark.
+    * Annualisation uses the empirical bars-per-year of the aligned calendar, so 252-day
+      equity, ~250-day Vietnamese and 365-day calendars are all handled correctly.
+    """
     if not req.asset_series or len(req.asset_series) < 2:
         raise ValueError("Portfolio backtest requires aligned OHLCV price series for at least 2 stocks.")
 
-    # Align on common calendar dates (YYYY-MM-DD)
     price_maps: Dict[str, Dict[str, float]] = {}
-    ordered_ids = [iid for iid in req.instrument_ids if iid in req.asset_series and len(req.asset_series[iid]) >= 20]
-    if len(ordered_ids) < 2:
-        raise ValueError("At least 2 selected stocks must have >= 20 valid historical bars.")
-
-    for iid in ordered_ids:
-        bars = sorted(req.asset_series[iid], key=lambda b: b.timestamp)
+    ordered_ids: List[str] = []
+    for iid in req.instrument_ids:
+        if iid not in req.asset_series:
+            continue
+        try:
+            bars, _ = prepare_bars(req.asset_series[iid], min_count=20, context=iid)
+        except ValueError:
+            continue
         pm: Dict[str, float] = {}
         for b in bars:
-            px = b.adjusted_close if b.adjusted_close is not None else b.close
-            if px > 0:
-                pm[b.timestamp.strftime("%Y-%m-%d")] = float(px)
+            pm[b.timestamp.strftime("%Y-%m-%d")] = float(b.adjusted_close if b.adjusted_close is not None else b.close)
         price_maps[iid] = pm
+        ordered_ids.append(iid)
+    if len(ordered_ids) < 2:
+        raise ValueError("At least 2 selected stocks must have >= 20 valid historical bars.")
 
     common_dates = sorted(set.intersection(*(set(m.keys()) for m in price_maps.values())))
     if len(common_dates) < 30:
@@ -437,102 +492,157 @@ def run_portfolio_backtest(req: PortfolioBacktestRequest) -> PortfolioBacktestRe
             f"Selected stocks share only {len(common_dates)} overlapping trading days (minimum 30 required)."
         )
 
-    # Trim to requested lookback window (default 10 years ~ 2520 trading days)
-    max_bars = int(req.years * 252) + 1
+    needs_estimation = req.allocation_method != "equal_weight"
+    n_rets_all = len(common_dates) - 1
+    warmup = min(ESTIMATION_LOOKBACK, max(MIN_ESTIMATION_OBS, n_rets_all // 4)) if needs_estimation else 0
+
+    # Trim to the requested evaluation window (+ warm-up for estimation when available).
+    max_bars = int(req.years * 252) + 1 + warmup
     if len(common_dates) > max_bars:
         common_dates = common_dates[-max_bars:]
+    n_rets_all = len(common_dates) - 1
+    if needs_estimation and n_rets_all - warmup < 20:
+        raise ValueError(
+            f"Only {n_rets_all} aligned returns: need at least {warmup + 20} to estimate "
+            f"{req.allocation_method} weights out-of-sample and evaluate them."
+        )
 
     prices = np.array([[price_maps[iid][d] for iid in ordered_ids] for d in common_dates], dtype=float)
     asset_rets = np.diff(prices, axis=0) / prices[:-1]
-    n_days, n_assets = asset_rets.shape
+    n_assets = asset_rets.shape[1]
 
-    # Compute target weights using initial 252-day (or first 25% of sample) estimation window to avoid full-sample look-ahead
-    calib_len = min(252, max(30, n_days // 4))
-    target_w = _compute_portfolio_weights(asset_rets[:calib_len], req.allocation_method, req.risk_free_rate_annual)
-    target_w = target_w / np.sum(target_w)
+    eval_dates = common_dates[warmup:]
+    ppy = infer_periods_per_year(eval_dates, default=252.0)
+    est_ppy = infer_periods_per_year(common_dates, default=252.0)
 
     cost_rate = (req.commission_bps + req.slippage_bps) / 10000.0
-    rebal_step = 63 if req.rebalance_frequency == "quarterly" else (252 if req.rebalance_frequency == "annually" else 10**9)
+    failed_estimates = 0
 
-    port_val = req.initial_capital
-    holdings = port_val * target_w
-    bench_holdings = req.initial_capital * np.full(n_assets, 1.0 / n_assets)
+    def _estimate(at_index: int) -> np.ndarray:
+        nonlocal failed_estimates
+        window = asset_rets[max(0, at_index - ESTIMATION_LOOKBACK):at_index]  # returns known at close `at_index`
+        w, ok = _compute_portfolio_weights(window, req.allocation_method, req.risk_free_rate_annual, est_ppy)
+        if not ok and needs_estimation:
+            failed_estimates += 1
+        return w
 
-    equity_curve: List[float] = [round(port_val, 2)]
+    target_w = _estimate(warmup)
+
+    # Initial purchase from cash: turnover = full capital for both portfolio and benchmark.
+    entry_cost = req.initial_capital * cost_rate
+    holdings = (req.initial_capital - entry_cost) * target_w
+    bench_holdings = (req.initial_capital - entry_cost) * np.full(n_assets, 1.0 / n_assets)
+    total_costs = entry_cost
+
+    equity_curve: List[float] = [round(req.initial_capital, 2)]
     bench_curve: List[float] = [round(req.initial_capital, 2)]
     port_daily_rets: List[float] = []
     rebal_count = 0
-    total_costs = 0.0
+    prev_val = req.initial_capital
 
-    for t in range(n_days):
-        prev_val = float(np.sum(holdings))
+    for t in range(warmup, n_rets_all):
         holdings = holdings * (1.0 + asset_rets[t])
         bench_holdings = bench_holdings * (1.0 + asset_rets[t])
-
         cur_val = float(np.sum(holdings))
-        if (t + 1) % rebal_step == 0 and t < n_days - 1:
+
+        d_prev, d_now = common_dates[t], common_dates[t + 1]
+        is_last = (t + 1) == n_rets_all
+        if (
+            req.rebalance_frequency != "buy_and_hold"
+            and not is_last
+            and _period_key(d_now, req.rebalance_frequency) != _period_key(d_prev, req.rebalance_frequency)
+        ):
+            if needs_estimation:
+                target_w = _estimate(t + 1)
             desired = cur_val * target_w
-            turnover = float(np.sum(np.abs(desired - holdings))) * 0.5
-            cost = turnover * cost_rate
+            traded_notional = float(np.sum(np.abs(desired - holdings)))  # buys + sells
+            cost = traded_notional * cost_rate
             total_costs += cost
             cur_val = max(0.01, cur_val - cost)
             holdings = cur_val * target_w
             rebal_count += 1
 
         port_daily_rets.append((cur_val - prev_val) / prev_val if prev_val > 0 else 0.0)
+        prev_val = cur_val
         equity_curve.append(round(cur_val, 2))
         bench_curve.append(round(float(np.sum(bench_holdings)), 2))
 
-    # Downsample curves slightly for smooth charting if > 400 points (keeping exact start/end)
     final_val = equity_curve[-1]
     bench_final = bench_curve[-1]
-    years_cov = max(0.08, n_days / 252.0)
+    span_days = (
+        datetime.fromisoformat(eval_dates[-1]) - datetime.fromisoformat(eval_dates[0])
+    ).days
+    years_cov = max(1.0 / 12.0, span_days / 365.25)
     tot_ret = (final_val / req.initial_capital) - 1.0
     bench_tot_ret = (bench_final / req.initial_capital) - 1.0
     cagr = (final_val / req.initial_capital) ** (1.0 / years_cov) - 1.0 if final_val > 0 else -1.0
     bench_cagr = (bench_final / req.initial_capital) ** (1.0 / years_cov) - 1.0 if bench_final > 0 else -1.0
-    ann_vol = float(np.std(port_daily_rets, ddof=1)) * math.sqrt(252.0) if len(port_daily_rets) > 1 else 0.0
-    sr = sharpe_ratio(port_daily_rets, req.risk_free_rate_annual, 252)
+    ann_vol = float(np.std(port_daily_rets, ddof=1)) * math.sqrt(ppy) if len(port_daily_rets) > 1 else 0.0
+    sr = sharpe_ratio(port_daily_rets, req.risk_free_rate_annual, ppy)
     dd = drawdown_analysis(equity_curve)
 
-    # Calendar-year breakdown
+    eval_rets = asset_rets[warmup:]
+    asset_vols = {
+        iid: round(float(np.std(eval_rets[:, j], ddof=1)) * math.sqrt(ppy), 6) if eval_rets.shape[0] > 1 else 0.0
+        for j, iid in enumerate(ordered_ids)
+    }
+
+    # Calendar-year breakdown: each year's return is measured from the LAST close of the
+    # previous year (when inside the evaluation window) to the last close of the year, so
+    # the first trading day's return of every year is included.
     by_year: Dict[int, List[int]] = {}
-    for idx, d in enumerate(common_dates):
-        yr = int(d[:4])
-        by_year.setdefault(yr, []).append(idx)
+    for idx, d in enumerate(eval_dates):
+        by_year.setdefault(int(d[:4]), []).append(idx)
     cal_returns: List[CalendarYearReturn] = []
     for yr in sorted(by_year.keys()):
         idxs = by_year[yr]
-        if len(idxs) < 2:
+        i0 = idxs[0] - 1 if idxs[0] > 0 else idxs[0]
+        i1 = idxs[-1]
+        if i1 <= i0:
             continue
-        i0, i1 = idxs[0], idxs[-1]
         p_r = (equity_curve[i1] / equity_curve[i0]) - 1.0 if equity_curve[i0] > 0 else 0.0
         b_r = (bench_curve[i1] / bench_curve[i0]) - 1.0 if bench_curve[i0] > 0 else 0.0
         cal_returns.append(CalendarYearReturn(year=yr, portfolio_return=round(p_r, 4), benchmark_return=round(b_r, 4)))
 
-    # Keep <= 300 chart points for fast frontend rendering while preserving exact endpoints
-    if len(common_dates) > 300:
-        step = max(1, len(common_dates) // 260)
-        sel = list(range(0, len(common_dates), step))
-        if sel[-1] != len(common_dates) - 1:
-            sel.append(len(common_dates) - 1)
-        out_ts = [common_dates[i] for i in sel]
+    # Keep <= ~300 chart points for fast frontend rendering while preserving exact endpoints
+    if len(eval_dates) > 300:
+        step = max(1, len(eval_dates) // 260)
+        sel = list(range(0, len(eval_dates), step))
+        if sel[-1] != len(eval_dates) - 1:
+            sel.append(len(eval_dates) - 1)
+        out_ts = [eval_dates[i] for i in sel]
         out_eq = [equity_curve[i] for i in sel]
         out_bm = [bench_curve[i] for i in sel]
     else:
-        out_ts = common_dates
+        out_ts = list(eval_dates)
         out_eq = equity_curve
         out_bm = bench_curve
+
+    assumptions = [
+        f"Aligned {len(ordered_ids)} portfolio stocks on {len(common_dates)} overlapping trading days; evaluation window {eval_dates[0]} to {eval_dates[-1]} ({years_cov:.1f} calendar years).",
+        (
+            f"Walk-forward {req.allocation_method} weights: first {warmup} returns are an estimation-only warm-up; "
+            f"weights are re-estimated at each {req.rebalance_frequency} rebalance from the trailing {ESTIMATION_LOOKBACK} returns known at that close (no look-ahead)."
+            if needs_estimation
+            else f"Equal-weight allocation with {req.rebalance_frequency} calendar rebalancing (no estimation required)."
+        ),
+        f"Transaction costs ({req.commission_bps:.1f} bps commission + {req.slippage_bps:.1f} bps slippage) are charged on the full traded notional, including the initial purchase.",
+        f"Volatility and Sharpe are annualised with the empirical calendar frequency of {ppy:.1f} bars/year; CAGR uses calendar years.",
+        "Benchmark is an Equal-Weight Buy-and-Hold basket of the identical selected stocks over the identical evaluation window.",
+        "Reported target_weights are the most recent walk-forward weights (the allocation held at the end of the backtest).",
+    ]
+    if failed_estimates:
+        assumptions.append(f"{failed_estimates} weight estimate(s) fell back to equal weight (insufficient data or optimiser non-convergence).")
 
     return PortfolioBacktestResponse(
         instrument_ids=ordered_ids,
         allocation_method=req.allocation_method,
         rebalance_frequency=req.rebalance_frequency,
         executed_at_utc=datetime.now(timezone.utc),
-        start_date=common_dates[0],
-        end_date=common_dates[-1],
+        start_date=eval_dates[0],
+        end_date=eval_dates[-1],
         years_covered=round(years_cov, 2),
-        observations=len(common_dates),
+        observations=len(eval_dates),
         initial_capital=req.initial_capital,
         final_portfolio_value=final_val,
         total_return=round(tot_ret, 4),
@@ -550,10 +660,8 @@ def run_portfolio_backtest(req: PortfolioBacktestRequest) -> PortfolioBacktestRe
         equity_curve=out_eq,
         benchmark_curve=out_bm,
         calendar_year_returns=cal_returns,
-        assumptions=[
-            f"Aligned {len(ordered_ids)} portfolio stocks on {len(common_dates)} overlapping trading days ({common_dates[0]} to {common_dates[-1]}, {years_cov:.1f} years).",
-            f"Target weights calibrated on the initial {calib_len}-day window ({req.allocation_method}) with {req.rebalance_frequency} rebalancing.",
-            f"Transaction costs ({req.commission_bps:.1f} bps commission + {req.slippage_bps:.1f} bps slippage) deducted on every rebalance turnover.",
-            "Benchmark is an Equal-Weight Buy-and-Hold basket of the identical selected stocks.",
-        ],
+        assumptions=assumptions,
+        periods_per_year=round(ppy, 2),
+        warmup_observations=warmup,
+        asset_annualized_volatility=asset_vols,
     )

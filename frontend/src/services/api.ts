@@ -31,6 +31,7 @@ export interface SingleAssetAnalyticsResponse {
   computed_at_utc: string;
   summary: SingleAssetSummaryMetrics;
   timestamps: string[];
+  closes: number[];
   simple_returns: Array<number | null>;
   cumulative_returns: Array<number | null>;
   drawdown_series: number[];
@@ -54,6 +55,10 @@ export interface PortfolioOptimizeResponse {
   equal_weight_portfolio: PortfolioPoint;
   efficient_frontier: PortfolioPoint[];
   assumptions: string[];
+  /** v4.1: 'sample' or 'ledoit_wolf' (auto-selected when the sample covariance is singular). */
+  covariance_estimator?: 'sample' | 'ledoit_wolf';
+  shrinkage_intensity?: number | null;
+  optimizer_warnings?: string[];
 }
 
 export interface RiskAnalysisResponse {
@@ -215,15 +220,76 @@ export interface MarketBlueprintResponse {
 }
 
 const API_BASE = '/api/v1';
+const DEFAULT_TIMEOUT_MS = 60_000;
+const LONG_TIMEOUT_MS = 180_000; // 10-year multi-asset fetch + simulation
 
-async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, init);
+/** Error raised for non-2xx responses, carrying the HTTP status and the server's `detail`. */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly detail: unknown;
+
+  constructor(status: number, detail: unknown, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+function describeDetail(detail: unknown): string {
+  if (typeof detail === 'string') return detail;
+  // FastAPI/pydantic validation errors: [{ loc: [...], msg: '...' }, ...]
+  if (Array.isArray(detail)) {
+    return detail
+      .map((d) => {
+        if (d && typeof d === 'object' && 'msg' in d) {
+          const item = d as { loc?: unknown[]; msg: string };
+          const loc = Array.isArray(item.loc) ? item.loc.slice(1).join('.') : '';
+          return loc ? `${loc}: ${item.msg}` : item.msg;
+        }
+        return JSON.stringify(d);
+      })
+      .join('; ');
+  }
+  return detail == null ? '' : JSON.stringify(detail);
+}
+
+async function fetchJson<T>(path: string, init?: RequestInit, timeoutMs: number = DEFAULT_TIMEOUT_MS): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new ApiError(0, null, `Request timed out after ${Math.round(timeoutMs / 1000)}s: ${path}`);
+    }
+    throw new ApiError(0, null, `Network error calling ${path}: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    clearTimeout(timer);
+  }
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`API error (${response.status}): ${text}`);
+    let detail: unknown = text;
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (parsed && typeof parsed === 'object' && 'detail' in parsed) {
+        detail = (parsed as { detail: unknown }).detail;
+      }
+    } catch {
+      // non-JSON error body: keep raw text
+    }
+    throw new ApiError(response.status, detail, `API error (${response.status}): ${describeDetail(detail)}`);
   }
   return response.json() as Promise<T>;
 }
+
+const postJson = <T>(path: string, body: unknown, timeoutMs?: number) =>
+  fetchJson<T>(
+    path,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+    timeoutMs
+  );
 
 
 export interface PredictionMarketContract {
@@ -348,6 +414,10 @@ export interface PortfolioBacktestResponse {
     benchmark_return: number;
   }>;
   assumptions: string[];
+  /** v4.1 additions */
+  periods_per_year?: number;
+  warmup_observations?: number;
+  asset_annualized_volatility?: Record<string, number>;
 }
 
 
@@ -509,7 +579,7 @@ export const quantApi = {
 
 
   getAssistantStatus: () =>
-    fetchJson<{ gemini_configured: boolean; key_prefix: string | null; gemini_model: string }>('/assistant/status'),
+    fetchJson<{ gemini_configured: boolean; gemini_model: string }>('/assistant/status'),
 
   askPortfolioAssistant: (payload: {
     question: string;
@@ -663,11 +733,7 @@ export const quantApi = {
     rebalance_frequency?: 'quarterly' | 'annually' | 'buy_and_hold';
     years?: number;
   }) =>
-    fetchJson<PortfolioSimulationResponse>('/portfolio/simulate-10y-forecast', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    }),
+    postJson<PortfolioSimulationResponse>('/portfolio/simulate-10y-forecast', payload, LONG_TIMEOUT_MS),
 
   runPortfolioBacktest: (payload: {
     instrument_ids: string[];
@@ -676,11 +742,7 @@ export const quantApi = {
     rebalance_frequency?: 'quarterly' | 'annually' | 'buy_and_hold';
     initial_capital?: number;
   }) =>
-    fetchJson<PortfolioBacktestResponse>('/backtesting/portfolio', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    }),
+    postJson<PortfolioBacktestResponse>('/backtesting/portfolio', payload, LONG_TIMEOUT_MS),
 };
 
 export const api = quantApi;

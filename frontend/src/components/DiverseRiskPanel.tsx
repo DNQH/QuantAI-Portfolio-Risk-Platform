@@ -201,8 +201,8 @@ export const DiverseRiskPanel: React.FC<Props> = ({ darkMode, availableInstrumen
         years: 10,
       });
       setSimResult(res);
-    } catch (err: any) {
-      setSimError(err?.message || 'Unable to run 10-year portfolio simulation. Check backend connection.');
+    } catch (err: unknown) {
+      setSimError(err instanceof Error && err.message ? err.message : 'Unable to run 10-year portfolio simulation. Check backend connection.');
     } finally {
       setSimLoading(false);
     }
@@ -239,8 +239,8 @@ export const DiverseRiskPanel: React.FC<Props> = ({ darkMode, availableInstrumen
         { role: 'assistant', content: res.answer, engine: res.engine_used },
       ]);
       if (res.used_llm) setGeminiOnline(true);
-    } catch (err: any) {
-      setPmError(err?.message || 'Unable to reach assistant. Verify backend is running on port 8000.');
+    } catch (err: unknown) {
+      setPmError(err instanceof Error && err.message ? err.message : 'Unable to reach assistant. Verify backend is running on port 8000.');
     } finally {
       setPmLoading(false);
     }
@@ -351,7 +351,7 @@ export const DiverseRiskPanel: React.FC<Props> = ({ darkMode, availableInstrumen
             <label className="text-[11px] opacity-65 block mb-1">Optimization Objective</label>
             <select
               value={allocationMethod}
-              onChange={(e) => setAllocationMethod(e.target.value as any)}
+              onChange={(e) => setAllocationMethod(e.target.value as typeof allocationMethod)}
               className={`w-full rounded-lg border px-2.5 py-1.5 text-xs ${subBg}`}
             >
               <option value="min_variance">Minimum Variance (Lowest Risk)</option>
@@ -363,7 +363,7 @@ export const DiverseRiskPanel: React.FC<Props> = ({ darkMode, availableInstrumen
             <label className="text-[11px] opacity-65 block mb-1">Rebalancing Schedule</label>
             <select
               value={rebalance}
-              onChange={(e) => setRebalance(e.target.value as any)}
+              onChange={(e) => setRebalance(e.target.value as typeof rebalance)}
               className={`w-full rounded-lg border px-2.5 py-1.5 text-xs ${subBg}`}
             >
               <option value="quarterly">Quarterly Rebalance</option>
@@ -625,7 +625,7 @@ export const DiverseRiskPanel: React.FC<Props> = ({ darkMode, availableInstrumen
                         <Cell key={idx} fill={PIE_COLORS[idx % PIE_COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip formatter={(v: any) => `${v}%`} />
+                    <Tooltip formatter={(v: number | string) => `${v}%`} />
                     <Legend />
                   </PieChart>
                 </ResponsiveContainer>

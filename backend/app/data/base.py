@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from collections import deque
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, Deque, Dict, Generic, List, Optional, Tuple, TypeVar
+from typing import Deque, Dict, Generic, List, Optional, Tuple, TypeVar
 
 from app.core.models import Instrument, OHLCVResponse, QuoteResponse
 

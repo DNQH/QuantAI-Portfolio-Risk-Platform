@@ -1,6 +1,6 @@
 # QuantAI — Global Portfolio Risk Optimization & Financial Risk Management Platform
 
-[[https://img.shields.io/badge/version-4.0.0-2563EB](https://img.shields.io/badge/version-4.0.0-2563EB)]
+[[https://img.shields.io/badge/version-4.1.0-2563EB](https://img.shields.io/badge/version-4.1.0-2563EB)]
 [[https://img.shields.io/badge/license-MIT-10B981](https://img.shields.io/badge/license-MIT-10B981)]
 [[https://img.shields.io/badge/python-3.11%2B-3776AB](https://img.shields.io/badge/python-3.11%2B-3776AB)]
 [[https://img.shields.io/badge/react-18%20%2B%20TypeScript-61DAFB](https://img.shields.io/badge/react-18%20%2B%20TypeScript-61DAFB)]
@@ -9,7 +9,7 @@
 
 **QuantAI** is a full-stack, institutional-grade **portfolio risk optimization, systemic macro-risk tracking, and corporate credit risk management platform** for global equity markets. Built as a technical portfolio project for Master's applications in **Finance, Quantitative Finance, Financial Engineering, and Financial Risk Management**, QuantAI combines verified financial mathematics (SciPy SLSQP, Black-Scholes-Merton, Altman Z-Score, Ohlson O-Score, VaR/CVaR, Monte Carlo simulation) with transparent market data provenance and a live multi-turn AI strategist.
 
-## Core Capabilities (v4.0.0)
+## Core Capabilities (v4.1.0)
 
 1. **Global Portfolio Risk Workbench (`backend/app/portfolio/`):**
    - Multi-market portfolio construction across US, Vietnam, Europe, Asia, and Australia covering **all 11 GICS sectors**, with pre-built low-correlation sector pairings and full custom ticker selection.
@@ -39,11 +39,11 @@
 
 - **Backend:** Python 3.11+, FastAPI, Pydantic, Uvicorn, httpx, SQLite, NumPy, Pandas, SciPy, scikit-learn / XGBoost *(also includes tested modular `analytics/`, `forecasting/`, and `backtesting/` REST APIs)*
 - **Frontend:** React 18, TypeScript, Vite, Tailwind CSS, TradingView Lightweight Charts, Recharts
-- **CI & Automated Testing:** GitHub Actions (`.github/workflows/ci.yml`) — **38 automated Python unit & API tests** + strict TypeScript & Vite production build
+- **CI & Automated Testing:** GitHub Actions (`.github/workflows/ci.yml`) — Python 3.11 & 3.13 matrix with `ruff` lint and **69 pytest unit, regression & API tests** + strict TypeScript & Vite production build (code-split, no chunk > 500 kB)
 - **Documentation:** `docs/architecture.md`, `docs/data_sources.md`, `docs/financial_formulas.md`, `CHANGELOG.md`
 
 ## Quick Start (Local)
 
 1. **Backend:** `cd backend && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt && python -m uvicorn app.main:app --reload --port 8000`
 2. **Frontend (new terminal):** `cd frontend && npm install && npm run dev`
-3. Open `http://localhost:5173`. Run tests anytime via `cd backend && python -m unittest discover -s tests -v`.
+3. Open `http://localhost:5173`. Run tests anytime via `cd backend && pip install -r requirements-dev.txt && python -m pytest -q && ruff check .`.

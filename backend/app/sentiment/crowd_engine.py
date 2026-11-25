@@ -18,7 +18,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Literal, Optional, Tuple
 
 import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 logger = logging.getLogger("quantai.sentiment")
 

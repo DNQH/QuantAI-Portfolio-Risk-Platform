@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import {
   Area,
   AreaChart,
@@ -13,15 +13,11 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { CandlestickChart } from './components/CandlestickChart';
-import { CrowdSentimentPanel } from './components/CrowdSentimentPanel';
-import { DiverseRiskPanel } from './components/DiverseRiskPanel';
 import { MarketSelectorDropdown, type MarketSelection } from './components/MarketSelectorDropdown';
 import { TickerSearchBox } from './components/TickerSearchBox';
-import { RiskAnalyticsPanel } from './components/RiskAnalyticsPanel';
-import { RiskTrackerPanel } from './components/RiskTrackerPanel';
 import { StatusBadge } from './components/StatusBadge';
 import { en } from './i18n/en';
+import { APP_VERSION } from './version';
 import {
   quantApi,
   type BacktestResponse,
@@ -71,6 +67,27 @@ const PERIODS: Array<{ label: string; value: string }> = [
 ];
 
 const cleanTicker = (id: string) => (id.includes(':') ? id.split(':')[1] : id);
+
+// Heavy, tab-specific panels are code-split so the initial bundle only contains the shell.
+const CandlestickChart = lazy(() =>
+  import('./components/CandlestickChart').then((m) => ({ default: m.CandlestickChart }))
+);
+const CrowdSentimentPanel = lazy(() =>
+  import('./components/CrowdSentimentPanel').then((m) => ({ default: m.CrowdSentimentPanel }))
+);
+const DiverseRiskPanel = lazy(() =>
+  import('./components/DiverseRiskPanel').then((m) => ({ default: m.DiverseRiskPanel }))
+);
+const RiskAnalyticsPanel = lazy(() =>
+  import('./components/RiskAnalyticsPanel').then((m) => ({ default: m.RiskAnalyticsPanel }))
+);
+const RiskTrackerPanel = lazy(() =>
+  import('./components/RiskTrackerPanel').then((m) => ({ default: m.RiskTrackerPanel }))
+);
+
+const PanelFallback: React.FC = () => (
+  <div className="rounded-lg border border-slate-600/40 p-6 text-center font-mono text-xs opacity-70">Loading module...</div>
+);
 
 const ML_MODEL_EXPLANATIONS: Record<string, { purpose: string; benefit: string }> = {
   'Naive Last Price': {
@@ -159,6 +176,12 @@ export const App: React.FC = () => {
 
   // Fetch quote + full daily history for quantitative models whenever instrument changes
   useEffect(() => {
+    // Ignore responses that arrive after the user has already switched instrument,
+    // otherwise a slow request for the previous ticker can overwrite the current one.
+    let cancelled = false;
+    const guard = <T,>(setter: (v: T) => void) => (v: T) => {
+      if (!cancelled) setter(v);
+    };
     setErrorMsg(null);
     setAnalytics(null);
     setRiskData(null);
@@ -171,37 +194,52 @@ export const App: React.FC = () => {
       quantApi.getOhlcv(selectedId, { period: 'max', interval: '1d', allowEducationalFallback: true }),
     ])
       .then(([q, dailyResp]) => {
+        if (cancelled) return;
         setQuote(q);
         setDailyOhlcv(dailyResp);
         const recentForQuant = dailyResp.bars.slice(-504); // Last 2 trading years for Sharpe/VaR/ML stability
         if (recentForQuant.length >= 2) {
           quantApi.analyzeSingleAsset(selectedId, recentForQuant, 0.04).then((res) => {
+            if (cancelled) return;
             setAnalytics(res);
             const validRets = res.simple_returns.filter((r): r is number => r !== null);
             if (validRets.length >= 10) {
-              quantApi.analyzeRisk(validRets, 100000).then(setRiskData).catch(() => {});
+              quantApi.analyzeRisk(validRets, 100000).then(guard(setRiskData)).catch(() => {});
             }
           }).catch(() => {});
         }
         if (recentForQuant.length >= 15) {
-          quantApi.evaluateSignals(selectedId, recentForQuant).then(setSignalsData).catch(() => {});
+          quantApi.evaluateSignals(selectedId, recentForQuant).then(guard(setSignalsData)).catch(() => {});
         }
         if (recentForQuant.length >= 40) {
-          quantApi.runForecast(selectedId, recentForQuant).then(setForecastData).catch(() => {});
+          quantApi.runForecast(selectedId, recentForQuant).then(guard(setForecastData)).catch(() => {});
         }
         if (recentForQuant.length >= 25) {
-          quantApi.runBacktest(selectedId, recentForQuant, backtestStrategy).then(setBacktestData).catch(() => {});
+          quantApi.runBacktest(selectedId, recentForQuant, backtestStrategy).then(guard(setBacktestData)).catch(() => {});
         }
       })
-      .catch((err) => setErrorMsg(String(err)));
+      .catch((err) => {
+        if (!cancelled) setErrorMsg(String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [selectedId]);
 
   // Fetch interactive candlestick chart bars whenever instrument, interval, or period changes
   useEffect(() => {
+    let cancelled = false;
     quantApi
       .getOhlcv(selectedId, { period, interval, allowEducationalFallback: true })
-      .then(setOhlcv)
-      .catch((err) => setErrorMsg(String(err)));
+      .then((resp) => {
+        if (!cancelled) setOhlcv(resp);
+      })
+      .catch((err) => {
+        if (!cancelled) setErrorMsg(String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [selectedId, interval, period]);
 
   useEffect(() => {
@@ -289,6 +327,15 @@ export const App: React.FC = () => {
     }));
   }, [backtestData]);
 
+  // True 20-bar momentum for the crowd-sentiment model (previously the whole-window total
+  // return of ~2 years was passed as the "20-day" return).
+  const recent20dReturn = useMemo(() => {
+    const closes = analytics?.closes;
+    if (!closes || closes.length < 21) return null;
+    const base = closes[closes.length - 21];
+    return base > 0 ? closes[closes.length - 1] / base - 1 : null;
+  }, [analytics]);
+
   const histVar95 = riskData?.var_results.find((v) => v.method === 'historical' && Math.abs(v.confidence_level - 0.95) < 0.01);
   const currentNav = NAV_ITEMS.find((n) => n.key === activeTab);
   const shellBg = darkMode ? 'bg-terminal-bg text-slate-100' : 'bg-slate-50 text-slate-900';
@@ -300,7 +347,7 @@ export const App: React.FC = () => {
         <div className="mb-6 border-b border-terminal-border pb-4 flex items-center justify-between">
           <div>
             <div className="text-lg font-bold tracking-tight">{en.brand.name}</div>
-            <div className="mt-1 font-mono text-[11px] text-emerald-400">v4.0.0</div>
+            <div className="mt-1 font-mono text-[11px] text-emerald-400">v{APP_VERSION}</div>
           </div>
           <button onClick={() => setDarkMode((d) => !d)} className="rounded border border-slate-600/40 px-2 py-1 font-mono text-[10px]">
             {darkMode ? 'Light' : 'Dark'}
@@ -530,7 +577,9 @@ export const App: React.FC = () => {
                   ? `${selectedId} · Interval: ${interval} · Bars: ${ohlcv.bars.length.toLocaleString()} (${ohlcv.bars[0].timestamp.slice(0, 10)} → ${ohlcv.bars[ohlcv.bars.length - 1].timestamp.slice(0, 10)})`
                   : 'Loading OHLCV bars...'}
               </div>
-              <CandlestickChart bars={ohlcv?.bars ?? []} interval={interval} />
+              <Suspense fallback={<PanelFallback />}>
+                <CandlestickChart bars={ohlcv?.bars ?? []} interval={interval} />
+              </Suspense>
               <p className="mt-2 text-[11px] opacity-65">
                 Note: Intraday intervals on Yahoo Finance are capped at 7 days (1m), 60 days (5m/15m), and 730 days (1h). Daily/weekly/monthly intervals with ALL (IPO) load full history from listing date to present.
               </p>
@@ -569,13 +618,15 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'riskTracker' && (
-          <RiskTrackerPanel
-            darkMode={darkMode}
-            onInspectStockRisk={(id) => {
-              setSelectedId(id);
-              setActiveTab('risk');
-            }}
-          />
+          <Suspense fallback={<PanelFallback />}>
+            <RiskTrackerPanel
+              darkMode={darkMode}
+              onInspectStockRisk={(id) => {
+                setSelectedId(id);
+                setActiveTab('risk');
+              }}
+            />
+          </Suspense>
         )}
 
         {activeTab === 'portfolio' && (
@@ -603,7 +654,11 @@ export const App: React.FC = () => {
               </button>
             </div>
 
-            {portfolioSubTab === 'diverse' && <DiverseRiskPanel darkMode={darkMode} availableInstruments={fullCatalog.length ? fullCatalog : instruments} />}
+            {portfolioSubTab === 'diverse' && (
+              <Suspense fallback={<PanelFallback />}>
+                <DiverseRiskPanel darkMode={darkMode} availableInstruments={fullCatalog.length ? fullCatalog : instruments} />
+              </Suspense>
+            )}
 
             {portfolioSubTab === 'mpt' && (
               <>
@@ -677,23 +732,27 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'risk' && (
-          <RiskAnalyticsPanel
-            instrumentId={selectedId}
-            cleanTicker={cleanTicker(selectedId)}
-            riskData={riskData}
-            darkMode={darkMode}
-          />
+          <Suspense fallback={<PanelFallback />}>
+            <RiskAnalyticsPanel
+              instrumentId={selectedId}
+              cleanTicker={cleanTicker(selectedId)}
+              riskData={riskData}
+              darkMode={darkMode}
+            />
+          </Suspense>
         )}
 
         {activeTab === 'crowdSentiment' && (
-          <CrowdSentimentPanel
-            instrumentId={selectedId}
-            cleanTicker={cleanTicker(selectedId)}
-            companyName={instruments.find((i) => i.instrument_id === selectedId)?.company_name || cleanTicker(selectedId)}
-            recentReturn20d={analytics?.summary.total_return ?? null}
-            annualizedVol={analytics?.summary.annualized_volatility ?? null}
-            darkMode={darkMode}
-          />
+          <Suspense fallback={<PanelFallback />}>
+            <CrowdSentimentPanel
+              instrumentId={selectedId}
+              cleanTicker={cleanTicker(selectedId)}
+              companyName={instruments.find((i) => i.instrument_id === selectedId)?.company_name || cleanTicker(selectedId)}
+              recentReturn20d={recent20dReturn}
+              annualizedVol={analytics?.summary.annualized_volatility ?? null}
+              darkMode={darkMode}
+            />
+          </Suspense>
         )}
 
         {activeTab === 'fx' && (

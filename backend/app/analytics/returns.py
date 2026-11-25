@@ -23,6 +23,49 @@ class DrawdownResult:
     series: List[float]
 
 
+def _is_valid_price(p: Optional[float]) -> bool:
+    return p is not None and isinstance(p, (int, float)) and math.isfinite(p) and p > 0
+
+
+def _negligible_dispersion(dispersion: float, arr: np.ndarray) -> bool:
+    """True when a std / downside deviation is pure floating-point noise.
+
+    np.std of a constant series is typically ~1e-19, not exactly 0.0, so an exact
+    ``== 0.0`` guard let Sharpe/Sortino explode to ~1e16 for constant returns.
+    """
+    scale = max(float(np.max(np.abs(arr))), 1e-12)
+    return dispersion <= 1e-10 * scale
+
+
+def infer_periods_per_year(timestamps: Sequence[object], default: float = 252.0) -> float:
+    """Infer the empirical number of observations per year from calendar timestamps.
+
+    Uses (n_obs - 1) / elapsed_years with elapsed_years = calendar days / 365.25, so
+    it adapts automatically to 252-day equity calendars, ~250-day Vietnamese
+    calendars, 365-day crypto calendars, and weekly/monthly sampling. Falls back to
+    ``default`` when fewer than 2 timestamps or under ~1 month of history is supplied.
+    """
+    from datetime import date, datetime
+
+    parsed: List[date] = []
+    for ts in timestamps:
+        if isinstance(ts, datetime):
+            parsed.append(ts.date())
+        elif isinstance(ts, date):
+            parsed.append(ts)
+        elif isinstance(ts, str) and len(ts) >= 10:
+            try:
+                parsed.append(date.fromisoformat(ts[:10]))
+            except ValueError:
+                continue
+    if len(parsed) < 2:
+        return default
+    span_days = (max(parsed) - min(parsed)).days
+    if span_days < 28:
+        return default
+    return (len(parsed) - 1) / (span_days / 365.25)
+
+
 def simple_returns(prices: Sequence[float]) -> List[Optional[float]]:
     """Compute period-over-period simple returns: (P_t - P_{t-1}) / P_{t-1}."""
     n = len(prices)
@@ -61,7 +104,7 @@ def cumulative_returns(prices: Sequence[float]) -> List[Optional[float]]:
     return [((p / p0) - 1.0) if (p is not None and p > 0 and math.isfinite(p)) else None for p in prices]
 
 
-def annualized_return(prices: Sequence[float], periods_per_year: int = 252) -> Optional[float]:
+def annualized_return(prices: Sequence[float], periods_per_year: float = 252) -> Optional[float]:
     """Compute geometric annualized return (CAGR) over T = len(prices) - 1 return periods."""
     if len(prices) < 2 or prices[0] <= 0 or prices[-1] <= 0:
         return None
@@ -72,7 +115,7 @@ def annualized_return(prices: Sequence[float], periods_per_year: int = 252) -> O
 
 def annualized_volatility(
     returns: Sequence[Optional[float]],
-    periods_per_year: int = 252,
+    periods_per_year: float = 252,
     ddof: int = 1,
 ) -> Optional[float]:
     """Compute annualized sample volatility: std(r, ddof=1) * sqrt(periods_per_year)."""
@@ -86,7 +129,7 @@ def annualized_volatility(
 def rolling_volatility(
     returns: Sequence[Optional[float]],
     window: int = 20,
-    periods_per_year: int = 252,
+    periods_per_year: float = 252,
     ddof: int = 1,
 ) -> List[Optional[float]]:
     """Compute annualized rolling sample standard deviation of returns."""
@@ -94,7 +137,9 @@ def rolling_volatility(
     out: List[Optional[float]] = []
     scale = math.sqrt(periods_per_year)
     for i in range(n):
-        if i < window:
+        # The window ending at bar i spans returns[i-window+1 .. i]; the first full
+        # window therefore ends at i = window-1 (it is rejected below if it contains None).
+        if i < window - 1:
             out.append(None)
             continue
         slice_vals = [r for r in returns[i - window + 1 : i + 1] if r is not None and math.isfinite(r)]
@@ -108,7 +153,7 @@ def rolling_volatility(
 def sharpe_ratio(
     returns: Sequence[Optional[float]],
     risk_free_rate_annual: float = 0.0,
-    periods_per_year: int = 252,
+    periods_per_year: float = 252,
 ) -> Optional[float]:
     """Compute annualized Sharpe Ratio: (mean_r * N - Rf) / (std_r * sqrt(N))."""
     valid = [r for r in returns if r is not None and math.isfinite(r)]
@@ -116,7 +161,7 @@ def sharpe_ratio(
         return None
     arr = np.asarray(valid, dtype=float)
     std = float(np.std(arr, ddof=1))
-    if std == 0.0:
+    if _negligible_dispersion(std, arr):
         return None
     ann_mean = float(np.mean(arr)) * periods_per_year
     ann_vol = std * math.sqrt(periods_per_year)
@@ -126,7 +171,7 @@ def sharpe_ratio(
 def sortino_ratio(
     returns: Sequence[Optional[float]],
     risk_free_rate_annual: float = 0.0,
-    periods_per_year: int = 252,
+    periods_per_year: float = 252,
 ) -> Optional[float]:
     """Compute annualized Sortino Ratio using downside semi-deviation below daily Rf."""
     valid = [r for r in returns if r is not None and math.isfinite(r)]
@@ -136,27 +181,38 @@ def sortino_ratio(
     rf_period = risk_free_rate_annual / periods_per_year
     downside_diff = np.minimum(0.0, arr - rf_period)
     downside_dev = math.sqrt(float(np.mean(downside_diff ** 2)))
-    if downside_dev == 0.0:
+    if _negligible_dispersion(downside_dev, arr):
         return None
     ann_mean = float(np.mean(arr)) * periods_per_year
     ann_downside = downside_dev * math.sqrt(periods_per_year)
     return (ann_mean - risk_free_rate_annual) / ann_downside
 
 
-def drawdown_analysis(prices: Sequence[float]) -> DrawdownResult:
-    """Compute running drawdown series, Maximum Drawdown, and recovery period."""
+def drawdown_analysis(prices: Sequence[Optional[float]]) -> DrawdownResult:
+    """Compute running drawdown series, Maximum Drawdown, and recovery period.
+
+    Missing / non-finite / non-positive observations do not reset the running
+    peak: they repeat the previous drawdown value so the output stays index-aligned.
+    """
     if not prices:
         return DrawdownResult(None, None, None, None, None, [])
 
-    running_peak = prices[0]
-    running_peak_idx = 0
+    first_valid = next((i for i, p in enumerate(prices) if _is_valid_price(p)), None)
+    if first_valid is None:
+        return DrawdownResult(None, None, None, None, None, [0.0] * len(prices))
+
+    running_peak = float(prices[first_valid])  # type: ignore[arg-type]
+    running_peak_idx = first_valid
     dd_series: List[float] = []
 
     max_dd = 0.0
-    mdd_peak_idx = 0
-    mdd_trough_idx = 0
+    mdd_peak_idx = first_valid
+    mdd_trough_idx = first_valid
 
     for i, p in enumerate(prices):
+        if not _is_valid_price(p):
+            dd_series.append(dd_series[-1] if dd_series else 0.0)
+            continue
         if p > running_peak:
             running_peak = p
             running_peak_idx = i
@@ -173,7 +229,8 @@ def drawdown_analysis(prices: Sequence[float]) -> DrawdownResult:
     peak_price = prices[mdd_peak_idx]
     recovery_idx: Optional[int] = None
     for j in range(mdd_trough_idx + 1, len(prices)):
-        if prices[j] >= peak_price:
+        pj = prices[j]
+        if _is_valid_price(pj) and pj >= peak_price:  # type: ignore[operator]
             recovery_idx = j
             break
 
