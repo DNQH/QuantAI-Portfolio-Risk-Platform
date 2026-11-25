@@ -16,6 +16,9 @@ All notable changes to **QuantAI** are documented in this file.
   tests (a real Gemini call previously ran from the assistant test).
 
 ### Changed
+- **Market Data Coverage UI:** the "Feed Status" column is now "Best Available Feed", with an
+  explainer that LIVE applies while the exchange is open (other pages show each quote's real
+  age, e.g. `DELAYED (968m)` before the US open); provider notes appear as a tooltip.
 - `render.yaml` / `docs/deployment.md`: `TWELVEDATA_API_KEY` documented as a historical-data
   backup and `EODHD_API_KEY` as reserved; neither makes non-US markets LIVE.
 
