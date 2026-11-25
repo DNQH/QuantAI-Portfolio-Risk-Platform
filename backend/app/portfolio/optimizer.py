@@ -17,14 +17,18 @@ from __future__ import annotations
 import itertools
 import math
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 from pydantic import BaseModel, Field
-from scipy.optimize import minimize
+from scipy.optimize import linprog, minimize
 
+from app.analytics.statistics import aligned_simple_returns, ledoit_wolf_covariance
 from app.core.database import DatabaseManager
+
+# Condition number above which the sample covariance is treated as numerically singular.
+ILL_CONDITIONED_THRESHOLD = 1e8
 
 PORTFOLIO_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS portfolios (
@@ -71,6 +75,10 @@ class PortfolioOptimizeRequest(BaseModel):
     max_weight: float = Field(default=1.0, ge=0.0, le=1.0)
     frontier_points: int = Field(default=15, ge=5, le=50)
     transaction_cost_bps: float = Field(default=10.0, ge=0.0, le=500.0)
+    covariance_method: Literal["auto", "sample", "ledoit_wolf"] = Field(
+        default="auto",
+        description="auto = sample covariance unless it is singular/ill-conditioned (then Ledoit-Wolf shrinkage).",
+    )
 
 
 class PortfolioPoint(BaseModel):
@@ -90,6 +98,9 @@ class PortfolioOptimizeResponse(BaseModel):
     equal_weight_portfolio: PortfolioPoint
     efficient_frontier: List[PortfolioPoint]
     assumptions: List[str]
+    covariance_estimator: str = "sample"
+    shrinkage_intensity: Optional[float] = None
+    optimizer_warnings: List[str] = Field(default_factory=list)
 
 
 class CAPMRequest(BaseModel):
@@ -111,8 +122,8 @@ class CAPMResponse(BaseModel):
 
 
 class FXAttributionRequest(BaseModel):
-    local_return: float
-    fx_return: float
+    local_return: float = Field(..., ge=-1.0, description="Local-currency asset return (>= -100%)")
+    fx_return: float = Field(..., ge=-1.0, description="Return of the local currency vs. the base currency (>= -100%)")
 
 
 class FXAttributionResponse(BaseModel):
@@ -218,19 +229,66 @@ def _solve_gmv(cov: np.ndarray) -> np.ndarray:
     res = minimize(
         lambda w: float(w @ cov @ w),
         w0,
+        jac=lambda w: 2.0 * (cov @ w),
         method="SLSQP",
         bounds=bounds,
         constraints=[{"type": "eq", "fun": lambda w: np.sum(w) - 1.0}],
     )
-    return res.x if res.success else w0
+    return _clean_weights(res.x, 0.0, 1.0) if res.success else w0
+
+
+def _clean_weights(w: np.ndarray, lo: float, hi: float) -> np.ndarray:
+    """Clip SLSQP round-off (e.g. -1e-12) back into the box and renormalise to sum 1."""
+    w = np.clip(np.asarray(w, dtype=float), lo, hi)
+    total = float(np.sum(w))
+    return w / total if total > 0 else np.full_like(w, 1.0 / len(w))
+
+
+def _feasible(w: np.ndarray, lo: float, hi: float, tol: float = 1e-6) -> bool:
+    return bool(abs(float(np.sum(w)) - 1.0) < tol and np.all(w >= lo - tol) and np.all(w <= hi + tol))
+
+
+def estimate_covariance(
+    rets: pd.DataFrame, periods_per_year: float, method: str = "auto"
+) -> Tuple[np.ndarray, str, Optional[float]]:
+    """Annualised covariance with optional Ledoit-Wolf shrinkage.
+
+    ``auto`` keeps the unbiased sample covariance unless T <= N or its condition number
+    exceeds ILL_CONDITIONED_THRESHOLD, in which case it switches to Ledoit-Wolf so the
+    optimiser never works on a singular matrix.
+    """
+    X = rets.to_numpy(dtype=float)
+    t_obs, n_assets = X.shape
+    sample = np.cov(X, rowvar=False, ddof=1).reshape(n_assets, n_assets)
+    use_lw = method == "ledoit_wolf"
+    if method == "auto":
+        try:
+            cond = float(np.linalg.cond(sample))
+        except np.linalg.LinAlgError:
+            cond = float("inf")
+        use_lw = t_obs <= n_assets or not math.isfinite(cond) or cond > ILL_CONDITIONED_THRESHOLD
+    if use_lw:
+        lw, delta = ledoit_wolf_covariance(X)
+        return lw * periods_per_year, "ledoit_wolf", delta
+    return sample * periods_per_year, "sample", None
+
+
+def _max_feasible_return(mu: np.ndarray, lo: float, hi: float) -> float:
+    """Highest expected return attainable under sum(w)=1 and lo <= w_i <= hi (linear program)."""
+    n = len(mu)
+    res = linprog(-mu, A_eq=np.ones((1, n)), b_eq=[1.0], bounds=[(lo, hi)] * n, method="highs")
+    if res.success:
+        return float(-res.fun)
+    return float(np.max(mu))
 
 
 def optimize_portfolio(req: PortfolioOptimizeRequest) -> PortfolioOptimizeResponse:
     if len(req.asset_price_maps) < 2:
         raise ValueError("Portfolio optimization requires at least 2 assets.")
+    if req.min_weight > req.max_weight:
+        raise ValueError("min_weight must not exceed max_weight.")
 
-    df = pd.DataFrame(req.asset_price_maps).sort_index().dropna(how="any")
-    rets = df.pct_change().dropna(how="any")
+    rets = aligned_simple_returns(req.asset_price_maps)
     if len(rets) < 5:
         raise ValueError("Need at least 6 aligned historical price dates across all assets.")
 
@@ -239,40 +297,79 @@ def optimize_portfolio(req: PortfolioOptimizeRequest) -> PortfolioOptimizeRespon
     if req.min_weight * n > 1.0 + 1e-9 or req.max_weight * n < 1.0 - 1e-9:
         raise ValueError("Infeasible weight bounds: ensure n*min_weight <= 1 <= n*max_weight.")
 
+    warnings: List[str] = []
     mu = rets.mean().to_numpy(dtype=float) * req.periods_per_year
-    cov = rets.cov(ddof=1).to_numpy(dtype=float) * req.periods_per_year
-    cov = cov + np.eye(n) * 1e-10
+    cov, cov_label, shrink = estimate_covariance(rets, req.periods_per_year, req.covariance_method)
+    if cov_label == "ledoit_wolf" and req.covariance_method == "auto":
+        warnings.append(
+            f"Sample covariance was singular/ill-conditioned ({len(rets)} observations, {n} assets); "
+            f"switched to Ledoit-Wolf shrinkage (intensity {shrink:.3f})."
+        )
+    cov = cov + np.eye(n) * 1e-12  # numerical jitter only
 
-    bounds = tuple((req.min_weight, req.max_weight) for _ in range(n))
-    sum_constraint = {"type": "eq", "fun": lambda w: np.sum(w) - 1.0}
+    lo, hi = req.min_weight, req.max_weight
+    bounds = tuple((lo, hi) for _ in range(n))
+    sum_constraint = {"type": "eq", "fun": lambda w: np.sum(w) - 1.0, "jac": lambda w: np.ones_like(w)}
     w0 = np.full(n, 1.0 / n, dtype=float)
 
-    gmv_res = minimize(lambda w: float(w @ cov @ w), w0, method="SLSQP", bounds=bounds, constraints=[sum_constraint])
-    w_gmv = gmv_res.x if gmv_res.success else w0
+    def variance(w: np.ndarray) -> float:
+        return float(w @ cov @ w)
+
+    def variance_grad(w: np.ndarray) -> np.ndarray:
+        return 2.0 * (cov @ w)
+
+    gmv_res = minimize(variance, w0, jac=variance_grad, method="SLSQP", bounds=bounds, constraints=[sum_constraint])
+    if gmv_res.success and _feasible(gmv_res.x, lo, hi):
+        w_gmv = _clean_weights(gmv_res.x, lo, hi)
+    else:
+        w_gmv = w0
+        warnings.append(f"Minimum-variance optimisation did not converge ({gmv_res.message}); reporting equal weights.")
 
     def neg_sharpe(w: np.ndarray) -> float:
         _, v, s, _ = compute_portfolio_stats(w, mu, cov, req.risk_free_rate_annual)
         return -s if v > 1e-12 else 1e6
 
-    ms_res = minimize(neg_sharpe, w0, method="SLSQP", bounds=bounds, constraints=[sum_constraint])
-    w_ms = ms_res.x if ms_res.success else w0
+    # Multi-start (equal weight + GMV) to avoid SLSQP stalling at a flat starting point.
+    best_ms: Optional[np.ndarray] = None
+    best_val = float("inf")
+    for start in (w0, w_gmv):
+        ms_res = minimize(neg_sharpe, start, method="SLSQP", bounds=bounds, constraints=[sum_constraint])
+        if ms_res.success and _feasible(ms_res.x, lo, hi) and float(ms_res.fun) < best_val:
+            best_val = float(ms_res.fun)
+            best_ms = _clean_weights(ms_res.x, lo, hi)
+    if best_ms is None:
+        w_ms = w0
+        warnings.append("Maximum-Sharpe optimisation did not converge; reporting equal weights.")
+    else:
+        w_ms = best_ms
 
+    # Efficient frontier: target returns span [GMV return, max return attainable under the weight bounds].
     gmv_ret = float(w_gmv @ mu)
-    max_feasible_ret = float(np.max(mu))
-    targets = np.linspace(min(gmv_ret, max_feasible_ret), max(gmv_ret, max_feasible_ret), req.frontier_points)
-
+    max_feasible_ret = _max_feasible_return(mu, lo, hi)
     frontier: List[PortfolioPoint] = []
-    for target_r in targets:
-        res = minimize(
-            lambda w: float(w @ cov @ w),
-            w_gmv,
-            method="SLSQP",
-            bounds=bounds,
-            constraints=[sum_constraint, {"type": "eq", "fun": lambda w, tr=target_r: float(w @ mu) - tr}],
-        )
-        if res.success:
-            frontier.append(_pack_point(symbols, res.x, mu, cov, req.risk_free_rate_annual))
-
+    failed_targets = 0
+    if max_feasible_ret - gmv_ret > 1e-10:
+        targets = np.linspace(gmv_ret, max_feasible_ret, req.frontier_points)
+        w_prev = w_gmv
+        for target_r in targets:
+            res = minimize(
+                variance,
+                w_prev,
+                jac=variance_grad,
+                method="SLSQP",
+                bounds=bounds,
+                constraints=[
+                    sum_constraint,
+                    {"type": "eq", "fun": lambda w, tr=target_r: float(w @ mu) - tr, "jac": lambda w: mu},
+                ],
+            )
+            if res.success and _feasible(res.x, lo, hi) and abs(float(res.x @ mu) - target_r) < 1e-6 * max(1.0, abs(target_r)):
+                w_prev = _clean_weights(res.x, lo, hi)
+                frontier.append(_pack_point(symbols, w_prev, mu, cov, req.risk_free_rate_annual))
+            else:
+                failed_targets += 1
+    if failed_targets:
+        warnings.append(f"{failed_targets} efficient-frontier target(s) failed to converge and were omitted.")
     if not frontier:
         frontier.append(_pack_point(symbols, w_gmv, mu, cov, req.risk_free_rate_annual))
 
@@ -284,12 +381,17 @@ def optimize_portfolio(req: PortfolioOptimizeRequest) -> PortfolioOptimizeRespon
         max_sharpe_portfolio=_pack_point(symbols, w_ms, mu, cov, req.risk_free_rate_annual),
         equal_weight_portfolio=_pack_point(symbols, w0, mu, cov, req.risk_free_rate_annual),
         efficient_frontier=frontier,
+        covariance_estimator=cov_label,
+        shrinkage_intensity=shrink,
+        optimizer_warnings=warnings,
         assumptions=[
-            f"Mean-Variance Optimization uses sample mean returns and sample covariance annualized by {req.periods_per_year}.",
-            f"Constraints: sum(weights) = 1, bounds = [{req.min_weight:.2f}, {req.max_weight:.2f}], Rf = {req.risk_free_rate_annual:.2%}.",
+            f"Mean-Variance Optimization uses sample mean returns and {'Ledoit-Wolf shrunk' if cov_label == 'ledoit_wolf' else 'sample'} covariance annualized by {req.periods_per_year}.",
+            f"Constraints: sum(weights) = 1, bounds = [{lo:.2f}, {hi:.2f}], Rf = {req.risk_free_rate_annual:.2%}.",
+            f"Efficient frontier spans target returns from the GMV portfolio ({gmv_ret:.2%}) to the maximum attainable under the bounds ({max_feasible_ret:.2%}).",
             f"Estimated turnover/rebalancing transaction cost assumption: {req.transaction_cost_bps:.1f} bps.",
             "Historical sample inputs do not guarantee future portfolio performance.",
-        ],
+        ]
+        + warnings,
     )
 
 
@@ -301,10 +403,12 @@ def analyze_diverse_risk(req: DiverseRiskRequest) -> DiverseRiskResponse:
     if n_assets < 2 or n_assets > 10:
         raise ValueError(f"Diverse-Risk analysis requires between 2 and 10 stocks (received {n_assets}).")
 
-    df = pd.DataFrame(req.asset_price_maps).sort_index().dropna(how="any")
-    rets = df.pct_change().dropna(how="any")
+    rets = aligned_simple_returns(req.asset_price_maps)
     if len(rets) < 5:
         raise ValueError("Need at least 6 overlapping trading dates across all selected stocks.")
+    constant = [str(c) for c in rets.columns if float(rets[c].std(ddof=1)) == 0.0]
+    if constant:
+        raise ValueError(f"Correlation-based diversification is undefined for constant-price series: {', '.join(constant)}.")
 
     symbols = list(rets.columns)
     n = len(symbols)
@@ -403,13 +507,17 @@ def analyze_diverse_risk(req: DiverseRiskRequest) -> DiverseRiskResponse:
 
     # Candidate Additions: measure marginal volatility impact of adding each external candidate
     candidate_results: List[CandidateAdditionResult] = []
-    port_daily_rets = rets.mean(axis=1)
     for cand_sym, cand_map in req.candidate_price_maps.items():
-        if cand_sym in symbols:
+        if cand_sym in symbols or not cand_map:
             continue
-        cand_series = pd.Series(cand_map, dtype=float).sort_index()
-        joined = pd.concat([rets, cand_series.pct_change().rename(cand_sym)], axis=1).dropna(how="any")
-        if len(joined) < 6:
+        # Align PRICES first, then compute returns, so every return in the joined sample spans
+        # the identical calendar interval for the basket and the candidate (computing the
+        # candidate's returns on its own calendar mixes 1-day and multi-day returns).
+        try:
+            joined = aligned_simple_returns({**req.asset_price_maps, cand_sym: cand_map})
+        except ValueError:
+            continue
+        if len(joined) < 6 or float(joined[cand_sym].std(ddof=1)) == 0.0:
             continue
         cand_ret = joined[cand_sym]
         sub_rets = joined[symbols]
@@ -469,6 +577,8 @@ def compute_capm(req: CAPMRequest) -> CAPMResponse:
         raise ValueError("asset_returns and market_returns must have equal length.")
     ra = np.asarray(req.asset_returns, dtype=float)
     rm = np.asarray(req.market_returns, dtype=float)
+    if not (np.all(np.isfinite(ra)) and np.all(np.isfinite(rm))):
+        raise ValueError("asset_returns and market_returns must contain only finite values.")
     var_m = float(np.var(rm, ddof=1))
     if var_m <= 1e-14:
         raise ValueError("Market return variance is zero; CAPM beta is undefined.")

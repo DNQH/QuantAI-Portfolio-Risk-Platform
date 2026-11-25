@@ -17,7 +17,7 @@ export const TickerSearchBox: React.FC<Props> = ({
   country,
   exchangeMic,
   darkMode,
-  className = 'w-80',
+  className = 'w-full sm:w-80',
 }) => {
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState<Instrument[]>([]);

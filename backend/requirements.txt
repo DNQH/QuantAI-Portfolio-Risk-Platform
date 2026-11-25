@@ -1,12 +1,14 @@
-fastapi>=0.92.0,<1.0.0
-uvicorn[standard]>=0.17.6
-pydantic>=1.10.4,<2.0.0
-httpx>=0.23.3
-pandas>=2.2.0
-numpy>=2.1.0
-scipy>=1.14.0
-python-dotenv>=1.0.0
-pytest>=8.0.0
+# Runtime dependencies (bounded ranges; tested with the versions noted on the right).
+# Dev/test tooling lives in requirements-dev.txt.
+fastapi>=0.110.0,<0.126.0        # tested 0.125.0; 0.126+ requires pydantic v2 (app still uses the pydantic v1 API)
+uvicorn[standard]>=0.29.0,<1.0.0 # tested 0.54.0
+pydantic>=1.10.17,<2.0.0         # tested 1.10.27; >=1.10.17 needed for Python 3.12/3.13
+httpx>=0.27.0,<1.0.0             # tested 0.28.1
+pandas>=2.2.0,<4.0.0             # tested 3.1.1
+numpy>=2.1.0,<3.0.0              # tested 2.5.5 (Python 3.13); Python 3.11 resolves an older 2.x
+scipy>=1.14.0,<2.0.0             # tested 1.18.1 (Python 3.13); Python 3.11 resolves an older 1.x
+python-dotenv>=1.0.0,<2.0.0      # tested 1.2.4
+
 # Optional free-stack market data packages (install locally for live/historical retrieval):
 # vnstock>=6.0.0
 # yfinance>=0.2.50

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
-from typing import Dict, FrozenSet, Optional, Tuple
+from typing import Dict, FrozenSet, Optional
 from zoneinfo import ZoneInfo
 
 from app.core.models import MarketSession, MarketSessionInfo

@@ -135,10 +135,13 @@ class TestQuantAIV2Features(unittest.TestCase):
         self.assertEqual(len(api_resp.json()["models"]), 7)
 
     def test_ten_year_portfolio_backtest(self) -> None:
+        # v4.1: min-variance weights now need a 1-year estimation-only warm-up before the
+        # out-of-sample evaluation window starts (no look-ahead), and years_covered is measured
+        # in calendar years. ~11 calendar years of data therefore yield a >= 9-year evaluation.
         series = {
-            "XNAS:AAPL": _synthetic_bars(100.0, 0.14, 0.24, n_days=3600),
-            "XNAS:MSFT": _synthetic_bars(80.0, 0.12, 0.22, n_days=3600),
-            "XSTC:FPT": _synthetic_bars(50.0, 0.10, 0.26, n_days=3600),
+            "XNAS:AAPL": _synthetic_bars(100.0, 0.14, 0.24, n_days=4000),
+            "XNAS:MSFT": _synthetic_bars(80.0, 0.12, 0.22, n_days=4000),
+            "XSTC:FPT": _synthetic_bars(50.0, 0.10, 0.26, n_days=4000),
         }
         req = PortfolioBacktestRequest(
             instrument_ids=["XNAS:AAPL", "XNAS:MSFT", "XSTC:FPT"],

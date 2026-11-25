@@ -1,8 +1,8 @@
 # QuantAI Project Status & Continuity Log
 
-**Last Updated:** 2026-11-20  
-**Current Version:** `v1.0.0` (Phases 0–8 Complete & Verified)  
-**Test Suite Status:** 25/25 automated backend unit & FastAPI integration tests passing (`unittest` & `pytest` compatible).
+**Last Updated:** 2026-11-25  
+**Current Version:** `v4.1.0` (quant-correctness & hardening release, see `CHANGELOG.md`)  
+**Test Suite Status:** 69/69 backend unit, regression & FastAPI integration tests passing under `pytest`; `ruff check` clean; frontend `npm run build` clean (no chunk > 500 kB).
 
 ## Completed Phases
 - **Phase 0:** Prototype audit & global market data provider evaluation.

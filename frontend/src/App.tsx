@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Area,
   AreaChart,
@@ -13,15 +13,11 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { CandlestickChart } from './components/CandlestickChart';
-import { CrowdSentimentPanel } from './components/CrowdSentimentPanel';
-import { DiverseRiskPanel } from './components/DiverseRiskPanel';
 import { MarketSelectorDropdown, type MarketSelection } from './components/MarketSelectorDropdown';
 import { TickerSearchBox } from './components/TickerSearchBox';
-import { RiskAnalyticsPanel } from './components/RiskAnalyticsPanel';
-import { RiskTrackerPanel } from './components/RiskTrackerPanel';
 import { StatusBadge } from './components/StatusBadge';
 import { en } from './i18n/en';
+import { APP_VERSION } from './version';
 import {
   quantApi,
   type BacktestResponse,
@@ -61,6 +57,46 @@ const NAV_ITEMS: Array<{ key: TabKey; label: string }> = [
   { key: 'coverage', label: en.nav.coverage },
 ];
 
+// URL hash slug for each tab, e.g. http://localhost:5173/#risk-analytics.
+// Keeping the active tab in the URL makes it survive a refresh, enables the
+// browser Back/Forward buttons, and lets a specific tab be bookmarked/shared.
+const TAB_SLUGS: Record<TabKey, string> = {
+  overview: 'overview',
+  marketData: 'market-data',
+  riskTracker: 'risk-tracker',
+  portfolio: 'portfolio',
+  risk: 'risk-analytics',
+  fx: 'fx',
+  crowdSentiment: 'sentiment',
+  coverage: 'coverage',
+};
+const DEFAULT_TAB: TabKey = 'overview';
+
+const tabFromHash = (hash: string): TabKey => {
+  const slug = decodeURIComponent(hash.replace(/^#\/?/, '')).toLowerCase();
+  const match = (Object.keys(TAB_SLUGS) as TabKey[]).find((k) => TAB_SLUGS[k] === slug);
+  return match ?? DEFAULT_TAB;
+};
+
+/** Active tab state mirrored to `location.hash` (one history entry per tab switch). */
+function useHashTab(): [TabKey, (next: TabKey) => void] {
+  const [tab, setTab] = useState<TabKey>(() => tabFromHash(window.location.hash));
+
+  useEffect(() => {
+    const onHashChange = () => setTab(tabFromHash(window.location.hash));
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  const navigate = useCallback((next: TabKey) => {
+    setTab(next);
+    const target = `#${TAB_SLUGS[next]}`;
+    if (window.location.hash !== target) window.location.hash = target;
+  }, []);
+
+  return [tab, navigate];
+}
+
 const INTERVALS = ['1m', '5m', '15m', '1h', '1d', '1wk', '1mo'] as const;
 const PERIODS: Array<{ label: string; value: string }> = [
   { label: '1M', value: '1mo' },
@@ -71,6 +107,27 @@ const PERIODS: Array<{ label: string; value: string }> = [
 ];
 
 const cleanTicker = (id: string) => (id.includes(':') ? id.split(':')[1] : id);
+
+// Heavy, tab-specific panels are code-split so the initial bundle only contains the shell.
+const CandlestickChart = lazy(() =>
+  import('./components/CandlestickChart').then((m) => ({ default: m.CandlestickChart }))
+);
+const CrowdSentimentPanel = lazy(() =>
+  import('./components/CrowdSentimentPanel').then((m) => ({ default: m.CrowdSentimentPanel }))
+);
+const DiverseRiskPanel = lazy(() =>
+  import('./components/DiverseRiskPanel').then((m) => ({ default: m.DiverseRiskPanel }))
+);
+const RiskAnalyticsPanel = lazy(() =>
+  import('./components/RiskAnalyticsPanel').then((m) => ({ default: m.RiskAnalyticsPanel }))
+);
+const RiskTrackerPanel = lazy(() =>
+  import('./components/RiskTrackerPanel').then((m) => ({ default: m.RiskTrackerPanel }))
+);
+
+const PanelFallback: React.FC = () => (
+  <div className="rounded-lg border border-slate-600/40 p-6 text-center font-mono text-xs opacity-70">Loading module...</div>
+);
 
 const ML_MODEL_EXPLANATIONS: Record<string, { purpose: string; benefit: string }> = {
   'Naive Last Price': {
@@ -104,7 +161,7 @@ const fmtNum = (v: number | null | undefined, digits = 2) => (v == null ? 'N/A' 
 
 export const App: React.FC = () => {
   const [darkMode, setDarkMode] = useState(true);
-  const [activeTab, setActiveTab] = useState<TabKey>('overview');
+  const [activeTab, setActiveTab] = useHashTab();
   const [searchQuery, setSearchQuery] = useState('');
   const [marketSelection, setMarketSelection] = useState<MarketSelection>({ country: 'ALL', exchangeMic: 'ALL', label: 'All Markets' });
   const [instruments, setInstruments] = useState<Instrument[]>([]);
@@ -159,6 +216,12 @@ export const App: React.FC = () => {
 
   // Fetch quote + full daily history for quantitative models whenever instrument changes
   useEffect(() => {
+    // Ignore responses that arrive after the user has already switched instrument,
+    // otherwise a slow request for the previous ticker can overwrite the current one.
+    let cancelled = false;
+    const guard = <T,>(setter: (v: T) => void) => (v: T) => {
+      if (!cancelled) setter(v);
+    };
     setErrorMsg(null);
     setAnalytics(null);
     setRiskData(null);
@@ -171,37 +234,52 @@ export const App: React.FC = () => {
       quantApi.getOhlcv(selectedId, { period: 'max', interval: '1d', allowEducationalFallback: true }),
     ])
       .then(([q, dailyResp]) => {
+        if (cancelled) return;
         setQuote(q);
         setDailyOhlcv(dailyResp);
         const recentForQuant = dailyResp.bars.slice(-504); // Last 2 trading years for Sharpe/VaR/ML stability
         if (recentForQuant.length >= 2) {
           quantApi.analyzeSingleAsset(selectedId, recentForQuant, 0.04).then((res) => {
+            if (cancelled) return;
             setAnalytics(res);
             const validRets = res.simple_returns.filter((r): r is number => r !== null);
             if (validRets.length >= 10) {
-              quantApi.analyzeRisk(validRets, 100000).then(setRiskData).catch(() => {});
+              quantApi.analyzeRisk(validRets, 100000).then(guard(setRiskData)).catch(() => {});
             }
           }).catch(() => {});
         }
         if (recentForQuant.length >= 15) {
-          quantApi.evaluateSignals(selectedId, recentForQuant).then(setSignalsData).catch(() => {});
+          quantApi.evaluateSignals(selectedId, recentForQuant).then(guard(setSignalsData)).catch(() => {});
         }
         if (recentForQuant.length >= 40) {
-          quantApi.runForecast(selectedId, recentForQuant).then(setForecastData).catch(() => {});
+          quantApi.runForecast(selectedId, recentForQuant).then(guard(setForecastData)).catch(() => {});
         }
         if (recentForQuant.length >= 25) {
-          quantApi.runBacktest(selectedId, recentForQuant, backtestStrategy).then(setBacktestData).catch(() => {});
+          quantApi.runBacktest(selectedId, recentForQuant, backtestStrategy).then(guard(setBacktestData)).catch(() => {});
         }
       })
-      .catch((err) => setErrorMsg(String(err)));
+      .catch((err) => {
+        if (!cancelled) setErrorMsg(String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [selectedId]);
 
   // Fetch interactive candlestick chart bars whenever instrument, interval, or period changes
   useEffect(() => {
+    let cancelled = false;
     quantApi
       .getOhlcv(selectedId, { period, interval, allowEducationalFallback: true })
-      .then(setOhlcv)
-      .catch((err) => setErrorMsg(String(err)));
+      .then((resp) => {
+        if (!cancelled) setOhlcv(resp);
+      })
+      .catch((err) => {
+        if (!cancelled) setErrorMsg(String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [selectedId, interval, period]);
 
   useEffect(() => {
@@ -289,30 +367,61 @@ export const App: React.FC = () => {
     }));
   }, [backtestData]);
 
+  // True 20-bar momentum for the crowd-sentiment model (previously the whole-window total
+  // return of ~2 years was passed as the "20-day" return).
+  const recent20dReturn = useMemo(() => {
+    const closes = analytics?.closes;
+    if (!closes || closes.length < 21) return null;
+    const base = closes[closes.length - 21];
+    return base > 0 ? closes[closes.length - 1] / base - 1 : null;
+  }, [analytics]);
+
   const histVar95 = riskData?.var_results.find((v) => v.method === 'historical' && Math.abs(v.confidence_level - 0.95) < 0.01);
   const currentNav = NAV_ITEMS.find((n) => n.key === activeTab);
+
+  useEffect(() => {
+    document.title = `${currentNav?.label ?? en.nav.overview} · ${en.brand.name}`;
+    // On narrow screens the nav is a horizontal strip: keep the active tab visible.
+    // Re-run whenever the button resizes (e.g. web fonts finishing loading after first paint).
+    const active = document.querySelector<HTMLElement>('aside nav [aria-current="page"]');
+    if (!active) return;
+    const reveal = () => active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    reveal();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(reveal);
+    observer.observe(active);
+    const stop = window.setTimeout(() => observer.disconnect(), 3000);
+    return () => {
+      window.clearTimeout(stop);
+      observer.disconnect();
+    };
+  }, [currentNav]);
   const shellBg = darkMode ? 'bg-terminal-bg text-slate-100' : 'bg-slate-50 text-slate-900';
   const panelBg = darkMode ? 'bg-terminal-surface border-terminal-border' : 'bg-white border-slate-200';
 
   return (
-    <div className={`min-h-screen flex ${shellBg}`}>
-      <aside className={`w-64 shrink-0 border-r p-4 flex flex-col ${panelBg}`}>
-        <div className="mb-6 border-b border-terminal-border pb-4 flex items-center justify-between">
+    <div className={`min-h-screen flex flex-col md:flex-row ${shellBg}`}>
+      {/* Below md the sidebar collapses into a top bar with a horizontally scrollable tab strip. */}
+      <aside
+        className={`w-full md:w-64 md:shrink-0 border-b md:border-b-0 md:border-r p-3 md:p-4 flex flex-col md:sticky md:top-0 md:h-screen ${panelBg}`}
+      >
+        <div className="mb-3 md:mb-6 border-b border-terminal-border pb-3 md:pb-4 flex items-center justify-between">
           <div>
             <div className="text-lg font-bold tracking-tight">{en.brand.name}</div>
-            <div className="mt-1 font-mono text-[11px] text-emerald-400">v4.0.0</div>
+            <div className="mt-1 font-mono text-[11px] text-emerald-400">v{APP_VERSION}</div>
           </div>
           <button onClick={() => setDarkMode((d) => !d)} className="rounded border border-slate-600/40 px-2 py-1 font-mono text-[10px]">
             {darkMode ? 'Light' : 'Dark'}
           </button>
         </div>
 
-        <nav className="space-y-1 flex-1">
+        <nav className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1 md:mx-0 md:flex-1 md:flex-col md:overflow-y-auto md:overflow-x-visible md:px-0 md:pb-0">
           {NAV_ITEMS.map((item) => (
             <button
               key={item.key}
               onClick={() => setActiveTab(item.key)}
-              className={`w-full flex items-center justify-between rounded-md px-3 py-2 text-left text-xs font-medium transition ${
+              aria-current={activeTab === item.key ? 'page' : undefined}
+              className={`shrink-0 whitespace-nowrap md:w-full flex items-center justify-between rounded-md border border-transparent px-3 py-2 text-left text-xs font-medium transition ${
                 activeTab === item.key ? 'bg-blue-600/20 text-blue-400 border border-blue-500/40' : 'opacity-80 hover:opacity-100'
               }`}
             >
@@ -322,13 +431,13 @@ export const App: React.FC = () => {
         </nav>
       </aside>
 
-      <main className="flex-1 p-6 overflow-y-auto">
+      <main className="flex-1 min-w-0 p-4 md:p-6">
         <header className="mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-terminal-border pb-4">
-          <div>
+          <div className="min-w-0">
             <h1 className="text-xl font-bold">{currentNav?.label}</h1>
             <p className="text-xs opacity-70">{en.brand.subtitle}</p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
             <MarketSelectorDropdown value={marketSelection} onChange={setMarketSelection} darkMode={darkMode} />
             <TickerSearchBox
               darkMode={darkMode}
@@ -530,7 +639,9 @@ export const App: React.FC = () => {
                   ? `${selectedId} · Interval: ${interval} · Bars: ${ohlcv.bars.length.toLocaleString()} (${ohlcv.bars[0].timestamp.slice(0, 10)} → ${ohlcv.bars[ohlcv.bars.length - 1].timestamp.slice(0, 10)})`
                   : 'Loading OHLCV bars...'}
               </div>
-              <CandlestickChart bars={ohlcv?.bars ?? []} interval={interval} />
+              <Suspense fallback={<PanelFallback />}>
+                <CandlestickChart bars={ohlcv?.bars ?? []} interval={interval} />
+              </Suspense>
               <p className="mt-2 text-[11px] opacity-65">
                 Note: Intraday intervals on Yahoo Finance are capped at 7 days (1m), 60 days (5m/15m), and 730 days (1h). Daily/weekly/monthly intervals with ALL (IPO) load full history from listing date to present.
               </p>
@@ -569,13 +680,15 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'riskTracker' && (
-          <RiskTrackerPanel
-            darkMode={darkMode}
-            onInspectStockRisk={(id) => {
-              setSelectedId(id);
-              setActiveTab('risk');
-            }}
-          />
+          <Suspense fallback={<PanelFallback />}>
+            <RiskTrackerPanel
+              darkMode={darkMode}
+              onInspectStockRisk={(id) => {
+                setSelectedId(id);
+                setActiveTab('risk');
+              }}
+            />
+          </Suspense>
         )}
 
         {activeTab === 'portfolio' && (
@@ -603,7 +716,11 @@ export const App: React.FC = () => {
               </button>
             </div>
 
-            {portfolioSubTab === 'diverse' && <DiverseRiskPanel darkMode={darkMode} availableInstruments={fullCatalog.length ? fullCatalog : instruments} />}
+            {portfolioSubTab === 'diverse' && (
+              <Suspense fallback={<PanelFallback />}>
+                <DiverseRiskPanel darkMode={darkMode} availableInstruments={fullCatalog.length ? fullCatalog : instruments} />
+              </Suspense>
+            )}
 
             {portfolioSubTab === 'mpt' && (
               <>
@@ -612,7 +729,7 @@ export const App: React.FC = () => {
                 type="text"
                 value={portfolioAssets}
                 onChange={(e) => setPortfolioAssets(e.target.value)}
-                className={`flex-1 min-w-[260px] rounded border px-3 py-1.5 font-mono text-xs ${panelBg}`}
+                className={`w-full flex-1 sm:w-auto sm:min-w-[260px] rounded border px-3 py-1.5 font-mono text-xs ${panelBg}`}
               />
               <button
                 onClick={runPortfolioOptimization}
@@ -677,23 +794,27 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'risk' && (
-          <RiskAnalyticsPanel
-            instrumentId={selectedId}
-            cleanTicker={cleanTicker(selectedId)}
-            riskData={riskData}
-            darkMode={darkMode}
-          />
+          <Suspense fallback={<PanelFallback />}>
+            <RiskAnalyticsPanel
+              instrumentId={selectedId}
+              cleanTicker={cleanTicker(selectedId)}
+              riskData={riskData}
+              darkMode={darkMode}
+            />
+          </Suspense>
         )}
 
         {activeTab === 'crowdSentiment' && (
-          <CrowdSentimentPanel
-            instrumentId={selectedId}
-            cleanTicker={cleanTicker(selectedId)}
-            companyName={instruments.find((i) => i.instrument_id === selectedId)?.company_name || cleanTicker(selectedId)}
-            recentReturn20d={analytics?.summary.total_return ?? null}
-            annualizedVol={analytics?.summary.annualized_volatility ?? null}
-            darkMode={darkMode}
-          />
+          <Suspense fallback={<PanelFallback />}>
+            <CrowdSentimentPanel
+              instrumentId={selectedId}
+              cleanTicker={cleanTicker(selectedId)}
+              companyName={instruments.find((i) => i.instrument_id === selectedId)?.company_name || cleanTicker(selectedId)}
+              recentReturn20d={recent20dReturn}
+              annualizedVol={analytics?.summary.annualized_volatility ?? null}
+              darkMode={darkMode}
+            />
+          </Suspense>
         )}
 
         {activeTab === 'fx' && (

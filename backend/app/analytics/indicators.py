@@ -9,7 +9,6 @@ Fixes every calculation bug audited in the Phase 0 prototype:
 
 from __future__ import annotations
 
-import math
 from typing import Dict, List, Optional, Sequence
 
 import numpy as np

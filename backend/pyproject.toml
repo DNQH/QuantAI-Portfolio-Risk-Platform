@@ -1,0 +1,29 @@
+[project]
+name = "quantai-backend"
+version = "4.1.0"
+description = "QuantAI Portfolio Risk Platform - FastAPI quantitative analytics backend"
+requires-python = ">=3.11"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 160
+extend-exclude = [".pytest_cache"]
+
+[tool.ruff.lint]
+# Correctness-focused rule set: pyflakes, pycodestyle errors/warnings, bugbear.
+select = ["E4", "E7", "E9", "F", "W", "B"]
+ignore = [
+    "B008",  # FastAPI dependency injection uses calls in defaults (Depends/Query) by design
+    "B905",  # zip(strict=...) not required; inputs are length-checked explicitly
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402"]  # legacy unittest modules adjust sys.path before importing the app
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = [
+    # Third-party (starlette TestClient) deprecation, not actionable in this codebase.
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+]
