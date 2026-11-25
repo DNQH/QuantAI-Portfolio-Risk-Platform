@@ -13,10 +13,18 @@ services:
       - key: QUANTAI_ENV
         value: production
       # Secrets: Render asks for these values when the Blueprint is created.
-      # Leave blank to run without them (AI assistant / Finnhub quotes disabled).
-      - key: GEMINI_API_KEY
+      # All optional: leave blank and the matching markets fall back to yfinance (DELAYED).
+      - key: GEMINI_API_KEY          # AI portfolio assistant
         sync: false
-      - key: FINNHUB_API_KEY
+      - key: FINNHUB_API_KEY         # NYSE / NASDAQ -> LIVE
+        sync: false
+      - key: TWELVEDATA_API_KEY      # LSE, Xetra, TSE, HKEX, SGX, ASX -> LIVE (preferred)
+        sync: false
+      - key: EODHD_API_KEY           # same markets, used when Twelve Data is not set
+        sync: false
+      - key: SSI_API_KEY             # HOSE / HNX / UPCOM -> LIVE (needs SSI_API_SECRET too)
+        sync: false
+      - key: SSI_API_SECRET
         sync: false
       # Abuse / cost guards (per client IP unless noted). 0 disables a rule.
       - key: QUANTAI_RATE_LIMIT_PER_MINUTE
