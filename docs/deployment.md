@@ -32,7 +32,7 @@ applied per real visitor IP.
    | `FINNHUB_API_KEY` | **LIVE** status for NYSE / NASDAQ |
    | `TWELVEDATA_API_KEY` | Backup source for historical daily bars when yfinance has none (does **not** make non-US markets LIVE) |
    | `EODHD_API_KEY` | Reserved for a future paid real-time adapter; currently unused |
-   | `SSI_API_KEY` + `SSI_API_SECRET` | **LIVE** status for HOSE / HNX / UPCOM (SSI brokerage account) |
+   | `SSI_CONSUMER_ID` + `SSI_CONSUMER_SECRET` | **LIVE** status for HOSE / HNX / UPCOM (SSI trading account + FastConnect Data registration) |
 
    LSE, Xetra, TSE, HKEX, SGX and ASX always show **DELAYED**: their quotes come from yfinance,
    and the badge only says LIVE when the app really has a real-time quote source.
@@ -76,7 +76,7 @@ deployment:
 | `QUANTAI_RATE_LIMIT_HEAVY_PER_MINUTE` | `20` | Simulations, backtests, forecasts, sentiment, credit, tracker |
 | `QUANTAI_ASSISTANT_PER_MINUTE` | `6` | Gemini assistant, per client IP |
 | `QUANTAI_ASSISTANT_DAILY_BUDGET` | `200` | Gemini assistant, **all visitors combined**, per UTC day |
-| `GEMINI_API_KEY`, `FINNHUB_API_KEY`, `TWELVEDATA_API_KEY`, `EODHD_API_KEY`, `SSI_API_KEY`, `SSI_API_SECRET` | unset | Optional provider keys (see table above); set them as host secrets, never in Git |
+| `GEMINI_API_KEY`, `FINNHUB_API_KEY`, `TWELVEDATA_API_KEY`, `EODHD_API_KEY`, `SSI_CONSUMER_ID`, `SSI_CONSUMER_SECRET` | unset | Optional provider keys (see table above); set them as host secrets, never in Git |
 
 A value of `0` disables a limit. Throttled requests get HTTP `429` with a `Retry-After`
 header and a human-readable `detail` message that the UI displays.

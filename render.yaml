@@ -22,9 +22,9 @@ services:
         sync: false
       - key: EODHD_API_KEY           # reserved for a future paid real-time adapter (not wired yet)
         sync: false
-      - key: SSI_API_KEY             # HOSE / HNX / UPCOM -> LIVE (needs SSI_API_SECRET too)
+      - key: SSI_CONSUMER_ID         # SSI FastConnect Data ConsumerID: HOSE / HNX / UPCOM -> LIVE
         sync: false
-      - key: SSI_API_SECRET
+      - key: SSI_CONSUMER_SECRET     # SSI FastConnect Data ConsumerSecret
         sync: false
       # Abuse / cost guards (per client IP unless noted). 0 disables a rule.
       - key: QUANTAI_RATE_LIMIT_PER_MINUTE

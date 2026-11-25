@@ -32,7 +32,7 @@
 
 5. **Global Market Data Explorer & FX Converter (`backend/app/data/`, `backend/app/fx/`):**
    - Cascading Country -> Exchange selector (**NYSE, NASDAQ, HOSE, HNX, UPCOM, LSE, Xetra, TSE, HKEX, SGX, ASX** and more) with 10 iconic flagship stocks per exchange and **live global autocomplete search** across tens of thousands of listed equities.
-   - Multi-provider architecture (`Finnhub`, `Twelve Data`, `SSI FastConnect V3`, `VNDirect dchart`, `TCBS`, `Vnstock v6`, `yfinance` educational fallback, and `Frankfurter v2` FX rates) with strict provenance tags (`LIVE`, `DELAYED`, `HISTORICAL`, `DAILY_REFERENCE`, `DATA_UNAVAILABLE`) and effective-dated ISO 10383 MIC symbology (including the scheduled **December 28, 2026 HNX-to-HOSE consolidation**).
+   - Multi-provider architecture (`Finnhub`, `Twelve Data`, `SSI FastConnect Data`, `VNDirect dchart`, `TCBS`, `Vnstock v6`, `yfinance` educational fallback, and `Frankfurter v2` FX rates) with strict provenance tags (`LIVE`, `DELAYED`, `HISTORICAL`, `DAILY_REFERENCE`, `DATA_UNAVAILABLE`) and effective-dated ISO 10383 MIC symbology (including the scheduled **December 28, 2026 HNX-to-HOSE consolidation**).
    - Full IPO-to-present interactive candlestick charts (`1m` to `1mo`) with Volume Histogram and direct navigation to `Risk Analytics`.
 
 ## Architecture & Technology Stack

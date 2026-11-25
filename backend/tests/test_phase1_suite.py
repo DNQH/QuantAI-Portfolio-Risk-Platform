@@ -221,7 +221,7 @@ class TestProvidersAndFastAPI(unittest.TestCase):
         self.assertEqual(body["status"], "ok")
         self.assertTrue(body["database_ready"])
         self.assertTrue(body["configured_providers"]["finnhub"])
-        self.assertFalse(body["configured_providers"]["ssi_fastconnect_v3"])
+        self.assertFalse(body["configured_providers"]["ssi_fastconnect_data"])
 
         cov = client.get("/api/v1/exchanges/coverage").json()
         mics = {row["exchange_mic"]: row for row in cov}
@@ -236,7 +236,7 @@ class TestProvidersAndFastAPI(unittest.TestCase):
         body = r.json()
         self.assertEqual(body["data_status"], "DATA_UNAVAILABLE")
         self.assertIsNone(body["price"])
-        self.assertIn("SSI FastConnect V3", body["unavailable_reason"])
+        self.assertIn("SSI FastConnect Data", body["unavailable_reason"])
 
     def test_finnhub_quote_has_dual_timestamps_and_paid_ohlcv_honesty(self) -> None:
         client = self._build_test_client()

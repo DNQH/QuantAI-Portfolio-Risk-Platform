@@ -25,6 +25,8 @@ for _key in (
     "MASSIVE_API_KEY",
     "SSI_API_KEY",
     "SSI_API_SECRET",
+    "SSI_CONSUMER_ID",
+    "SSI_CONSUMER_SECRET",
     "VNSTOCK_API_KEY",
 ):
     os.environ.pop(_key, None)

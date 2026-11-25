@@ -87,8 +87,13 @@ class Settings:
     )
 
     finnhub_api_key: Optional[str] = field(default_factory=lambda: (os.getenv("FINNHUB_API_KEY") or "").strip() or None)
-    ssi_api_key: Optional[str] = field(default_factory=lambda: (os.getenv("SSI_API_KEY") or "").strip() or None)
-    ssi_api_secret: Optional[str] = field(default_factory=lambda: (os.getenv("SSI_API_SECRET") or "").strip() or None)
+    # SSI FastConnect Data ConsumerID / ConsumerSecret (legacy env names SSI_API_KEY / SSI_API_SECRET).
+    ssi_api_key: Optional[str] = field(
+        default_factory=lambda: (os.getenv("SSI_CONSUMER_ID") or os.getenv("SSI_API_KEY") or "").strip() or None
+    )
+    ssi_api_secret: Optional[str] = field(
+        default_factory=lambda: (os.getenv("SSI_CONSUMER_SECRET") or os.getenv("SSI_API_SECRET") or "").strip() or None
+    )
     vnstock_api_key: Optional[str] = field(default_factory=lambda: (os.getenv("VNSTOCK_API_KEY") or "").strip() or None)
     vnstock_source: str = field(default_factory=lambda: os.getenv("VNSTOCK_SOURCE", "VCI"))
 

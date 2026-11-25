@@ -7,7 +7,7 @@ Enforces strict provenance and zero-silent-fallback guarantees:
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 from app.core.calendar import get_market_session
@@ -38,6 +38,10 @@ from app.data.providers.yfinance_fallback import CURRENCY_BY_MIC, YFinanceFallba
 from app.fx.frankfurter import FrankfurterFXProvider
 
 ALL_SUPPORTED_MICS = frozenset(YFINANCE_SUFFIX_BY_MIC.keys())
+
+
+# Calendar days requested from SSI for the UI period selectors (max = full history).
+_PERIOD_DAYS = {"1mo": 31, "6mo": 183, "1y": 366, "2y": 731, "5y": 1827, "10y": 3653}
 
 
 class MarketDataRegistry:
@@ -77,7 +81,7 @@ class MarketDataRegistry:
         return {
             "finnhub": self.finnhub.is_configured(),
             "vnstock_v6": self.vnstock.is_configured(),
-            "ssi_fastconnect_v3": self.ssi.is_configured(),
+            "ssi_fastconnect_data": self.ssi.is_configured(),
             "frankfurter_v2": True,
             "yfinance_fallback": self.yfinance_fallback.is_configured(),
             "eodhd_paid_hook": self.eodhd.is_configured(),
@@ -296,12 +300,12 @@ class MarketDataRegistry:
                     ticker=ticker,
                     exchange_mic=eff_mic,
                     currency="VND",
-                    provider="ssi_fastconnect_v3",
+                    provider="ssi_fastconnect_data",
                     data_status=DataStatus.DATA_UNAVAILABLE,
                     market_session=session.session,
                     retrieval_timestamp=now_utc,
                     warnings=[migration_note] if migration_note else [],
-                    unavailable_reason="Strict LIVE Vietnam quote requires SSI FastConnect V3 credentials.",
+                    unavailable_reason="Strict LIVE Vietnam quote requires SSI FastConnect Data credentials.",
                 )
             if self.vnstock.is_configured():
                 quote = self.vnstock.get_quote(ticker, eff_mic)
@@ -319,7 +323,7 @@ class MarketDataRegistry:
                 market_session=session.session,
                 retrieval_timestamp=now_utc,
                 warnings=[migration_note] if migration_note else [],
-                unavailable_reason="Neither SSI FastConnect V3 credentials nor vnstock package are available.",
+                unavailable_reason="Neither SSI FastConnect Data credentials nor vnstock package are available.",
             )
 
         # Phase 7 Global Exchanges (Europe, Asia, ASEAN, Oceania)
@@ -526,6 +530,15 @@ class MarketDataRegistry:
                 unavailable_reason=f"Exchange {eff_mic} is not yet integrated.",
             )
 
+        # Licensed Vietnam daily history from SSI FastConnect Data when credentials are configured.
+        if eff_mic in {"XSTC", "XHAI", "XUPC"} and interval == "1d" and self.ssi.is_configured():
+            ssi_start = start_date
+            if ssi_start is None and period and period != "max":
+                ssi_start = (end_date or now_utc.date()) - timedelta(days=_PERIOD_DAYS.get(period, 3660))
+            resp = self.ssi.get_ohlcv(ticker, eff_mic, interval, ssi_start, end_date)
+            if resp.data_status != DataStatus.DATA_UNAVAILABLE and len(resp.bars) >= 20:
+                return resp
+
         if eff_mic in {"XSTC", "XHAI", "XUPC"} and self.vnstock.is_configured() and period != "max":
             resp = self.vnstock.get_ohlcv(ticker, eff_mic, interval, start_date, end_date)
             if resp.data_status != DataStatus.DATA_UNAVAILABLE:
@@ -643,10 +656,10 @@ class MarketDataRegistry:
                 coverage_status=CoverageStatus.LIVE_VERIFIED if ssi_ready else (CoverageStatus.DELAYED_AVAILABLE if (vnstock_ready or yf_ready) else CoverageStatus.CREDENTIALS_REQUIRED),
                 quote_data_status=DataStatus.LIVE if ssi_ready else DataStatus.DELAYED,
                 historical_data_status=global_hist_status,
-                primary_provider="SSI FastConnect V3 (Live) / Vnstock v6",
+                primary_provider="SSI FastConnect Data (Live) / Vnstock v6",
                 fallback_provider="yfinance (.VN Educational Historical)",
                 requires_credentials=True, requires_paid_plan_for_live=False,
-                notes="LIVE requires SSI brokerage credentials ($0 API fee); historical & delayed quotes active via yfinance/Vnstock.",
+                notes="LIVE requires SSI FastConnect Data credentials ($0 API fee); historical & delayed quotes active via yfinance/Vnstock.",
             ),
             ExchangeCoverageEntry(
                 exchange_mic="XHAI", exchange_acronym="HNX", exchange_name="Hanoi Stock Exchange",
@@ -655,7 +668,7 @@ class MarketDataRegistry:
                 coverage_status=CoverageStatus.LIVE_VERIFIED if ssi_ready else (CoverageStatus.DELAYED_AVAILABLE if (vnstock_ready or yf_ready) else CoverageStatus.CREDENTIALS_REQUIRED),
                 quote_data_status=DataStatus.LIVE if ssi_ready else DataStatus.DELAYED,
                 historical_data_status=global_hist_status,
-                primary_provider="SSI FastConnect V3 (Live) / Vnstock v6",
+                primary_provider="SSI FastConnect Data (Live) / Vnstock v6",
                 fallback_provider="yfinance (.VN Educational Historical)",
                 requires_credentials=True, requires_paid_plan_for_live=False,
                 notes="Active through 2026-12-23; effective-dated transfer to HOSE (XSTC) on 2026-12-28.",
@@ -667,10 +680,10 @@ class MarketDataRegistry:
                 coverage_status=CoverageStatus.LIVE_VERIFIED if ssi_ready else (CoverageStatus.DELAYED_AVAILABLE if (vnstock_ready or yf_ready) else CoverageStatus.CREDENTIALS_REQUIRED),
                 quote_data_status=DataStatus.LIVE if ssi_ready else DataStatus.DELAYED,
                 historical_data_status=global_hist_status,
-                primary_provider="SSI FastConnect V3 (Live) / Vnstock v6",
+                primary_provider="SSI FastConnect Data (Live) / Vnstock v6",
                 fallback_provider="yfinance (.VN Educational Historical)",
                 requires_credentials=True, requires_paid_plan_for_live=False,
-                notes="LIVE requires SSI FastConnect V3 credentials ($0 API fee); historical & delayed quotes active via yfinance/Vnstock.",
+                notes="LIVE requires SSI FastConnect Data credentials ($0 API fee); historical & delayed quotes active via yfinance/Vnstock.",
             ),
             ExchangeCoverageEntry(
                 exchange_mic="XLON", exchange_acronym="LSE", exchange_name="London Stock Exchange",
