@@ -2,6 +2,18 @@
 
 All notable changes to **QuantAI** are documented in this file.
 
+## [Unreleased]
+### Added — public web deployment
+- **Single-container deployment:** multi-stage `Dockerfile` builds the React UI and serves it
+  from FastAPI on one port (`QUANTAI_FRONTEND_DIST`), with immutable caching for hashed
+  assets, SPA fallback, JSON 404s for unknown `/api` paths, non-root user, `$PORT` support,
+  proxy-header handling and a Docker `HEALTHCHECK`.
+- **Render Blueprint** (`render.yaml`) and `docs/deployment.md` step-by-step guide.
+- **Per-client-IP rate limiting** (`app/core/ratelimit.py`), on by default when
+  `QUANTAI_ENV=production`: general API, heavy analytics endpoints, and the Gemini assistant
+  (per-minute plus a global daily budget). Returns `429` with `Retry-After`.
+- `backend/requirements-deploy.txt` (runtime + yfinance) and a CI job that builds the image.
+
 ## [4.1.0] - 2026-11-25
 Quant-correctness, robustness and engineering hardening release. Public API shapes are
 backward compatible (only optional fields were added; `key_prefix` was removed from

@@ -47,9 +47,19 @@ _load_env_files()
 
 def _env_bool(name: str, default: bool = False) -> bool:
     raw = os.getenv(name)
-    if raw is None:
+    if raw is None or not raw.strip():
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return default
 
 
 @dataclass(frozen=True)
@@ -90,6 +100,25 @@ class Settings:
     http_timeout_seconds: float = field(
         default_factory=lambda: float(os.getenv("QUANTAI_HTTP_TIMEOUT", "20.0"))
     )
+
+    # --- Public deployment ---
+    # Path to the built frontend (Vite dist/). When set, the API also serves the UI so the
+    # whole app lives on a single URL. Empty = API only (local dev uses the Vite server).
+    frontend_dist: Optional[str] = field(
+        default_factory=lambda: (os.getenv("QUANTAI_FRONTEND_DIST") or "").strip() or None
+    )
+    # Per-client-IP rate limits. Enabled by default only when QUANTAI_ENV=production.
+    rate_limit_enabled: bool = field(
+        default_factory=lambda: _env_bool(
+            "QUANTAI_RATE_LIMIT_ENABLED", os.getenv("QUANTAI_ENV", "development").lower() == "production"
+        )
+    )
+    rate_limit_per_minute: int = field(default_factory=lambda: _env_int("QUANTAI_RATE_LIMIT_PER_MINUTE", 240))
+    rate_limit_heavy_per_minute: int = field(
+        default_factory=lambda: _env_int("QUANTAI_RATE_LIMIT_HEAVY_PER_MINUTE", 20)
+    )
+    assistant_per_minute: int = field(default_factory=lambda: _env_int("QUANTAI_ASSISTANT_PER_MINUTE", 6))
+    assistant_daily_budget: int = field(default_factory=lambda: _env_int("QUANTAI_ASSISTANT_DAILY_BUDGET", 200))
 
     @property
     def cors_origin_list(self) -> list[str]:
