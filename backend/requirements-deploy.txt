@@ -1,0 +1,5 @@
+# Runtime dependencies for the public Docker image: core requirements plus the free
+# market-data provider used for historical bars (labelled "educational fallback",
+# never LIVE). Local development can keep using requirements.txt only.
+-r requirements.txt
+yfinance>=0.2.50,<2.0.0          # tested 1.8.0

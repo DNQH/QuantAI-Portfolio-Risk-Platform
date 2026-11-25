@@ -1,0 +1,29 @@
+# Render Blueprint — one-click deploy of QuantAI as a single Docker web service.
+# Render dashboard -> New -> Blueprint -> select this repository.
+# See docs/deployment.md for the step-by-step guide.
+services:
+  - type: web
+    name: quantai
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: QUANTAI_ENV
+        value: production
+      # Secrets: Render asks for these values when the Blueprint is created.
+      # Leave blank to run without them (AI assistant / Finnhub quotes disabled).
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: FINNHUB_API_KEY
+        sync: false
+      # Abuse / cost guards (per client IP unless noted). 0 disables a rule.
+      - key: QUANTAI_RATE_LIMIT_PER_MINUTE
+        value: "240"
+      - key: QUANTAI_RATE_LIMIT_HEAVY_PER_MINUTE
+        value: "20"
+      - key: QUANTAI_ASSISTANT_PER_MINUTE
+        value: "6"
+      - key: QUANTAI_ASSISTANT_DAILY_BUDGET   # global cap on Gemini calls per UTC day
+        value: "200"
