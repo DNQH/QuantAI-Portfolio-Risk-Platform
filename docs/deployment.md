@@ -30,8 +30,12 @@ applied per real visitor IP.
    |---|---|
    | `GEMINI_API_KEY` | AI portfolio assistant |
    | `FINNHUB_API_KEY` | **LIVE** status for NYSE / NASDAQ |
-   | `TWELVEDATA_API_KEY` (or `EODHD_API_KEY`) | **LIVE** status for LSE, Xetra, TSE, HKEX, SGX, ASX |
+   | `TWELVEDATA_API_KEY` | Backup source for historical daily bars when yfinance has none (does **not** make non-US markets LIVE) |
+   | `EODHD_API_KEY` | Reserved for a future paid real-time adapter; currently unused |
    | `SSI_API_KEY` + `SSI_API_SECRET` | **LIVE** status for HOSE / HNX / UPCOM (SSI brokerage account) |
+
+   LSE, Xetra, TSE, HKEX, SGX and ASX always show **DELAYED**: their quotes come from yfinance,
+   and the badge only says LIVE when the app really has a real-time quote source.
 
    Keys can also be added or changed later under the service's **Environment** tab
    (saving triggers a redeploy).

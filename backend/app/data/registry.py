@@ -577,7 +577,28 @@ class MarketDataRegistry:
         vnstock_ready = self.vnstock.is_configured()
         yf_ready = self.yfinance_fallback.is_configured()
 
-        global_live_ready = self.twelvedata.is_configured() or self.eodhd.is_configured()
+        # Global (non-US, non-VN) quotes are routed to yfinance in get_quote(); a paid provider
+        # only counts as LIVE once its quote adapter is actually implemented. Having an API key
+        # is not enough (Twelve Data is currently used solely as a historical-bars backup).
+        global_live_provider = next(
+            (
+                p
+                for p in (self.twelvedata, self.eodhd)
+                if p.is_configured() and getattr(p, "live_quotes_implemented", False)
+            ),
+            None,
+        )
+        global_live_ready = global_live_provider is not None
+        if global_live_provider is not None:
+            global_primary = f"{global_live_provider.capabilities.display_name.split(' (')[0]} (Live Global)"
+        else:
+            global_primary = "yfinance (Delayed)"
+        global_note_suffix = (
+            " A Twelve Data key is configured and used as a backup source for historical daily bars;"
+            " it does not provide live quotes here."
+            if self.twelvedata.is_configured() and not global_live_ready
+            else ""
+        )
         global_cov_status = (
             CoverageStatus.LIVE_VERIFIED
             if global_live_ready
@@ -656,53 +677,53 @@ class MarketDataRegistry:
                 region="Europe", country="United Kingdom", currency="GBP", timezone="Europe/London",
                 phase="Phase 7", coverage_status=global_cov_status, quote_data_status=global_quote_status,
                 historical_data_status=global_hist_status,
-                primary_provider="Twelve Data (Live Global)" if self.twelvedata.is_configured() else ("EODHD (Live Global)" if self.eodhd.is_configured() else "yfinance (Delayed)"),
+                primary_provider=global_primary,
                 fallback_provider="yfinance (.L)", requires_credentials=False, requires_paid_plan_for_live=True,
-                notes="Historical & delayed quotes available via yfinance (.L); real-time requires paid EODHD/Twelve Data.",
+                notes="Historical & delayed quotes available via yfinance (.L); real-time requires paid EODHD/Twelve Data." + global_note_suffix,
             ),
             ExchangeCoverageEntry(
                 exchange_mic="XETR", exchange_acronym="Xetra", exchange_name="Deutsche Börse Xetra",
                 region="Europe", country="Germany", currency="EUR", timezone="Europe/Berlin",
                 phase="Phase 7", coverage_status=global_cov_status, quote_data_status=global_quote_status,
                 historical_data_status=global_hist_status,
-                primary_provider="Twelve Data (Live Global)" if self.twelvedata.is_configured() else ("EODHD (Live Global)" if self.eodhd.is_configured() else "yfinance (Delayed)"),
+                primary_provider=global_primary,
                 fallback_provider="yfinance (.DE)", requires_credentials=False, requires_paid_plan_for_live=True,
-                notes="Historical & delayed quotes available via yfinance (.DE); real-time requires paid EODHD/Twelve Data.",
+                notes="Historical & delayed quotes available via yfinance (.DE); real-time requires paid EODHD/Twelve Data." + global_note_suffix,
             ),
             ExchangeCoverageEntry(
                 exchange_mic="XTKS", exchange_acronym="TSE", exchange_name="Tokyo Stock Exchange",
                 region="Asia", country="Japan", currency="JPY", timezone="Asia/Tokyo",
                 phase="Phase 7", coverage_status=global_cov_status, quote_data_status=global_quote_status,
                 historical_data_status=global_hist_status,
-                primary_provider="Twelve Data (Live Global)" if self.twelvedata.is_configured() else ("EODHD (Live Global)" if self.eodhd.is_configured() else "yfinance (Delayed)"),
+                primary_provider=global_primary,
                 fallback_provider="yfinance (.T)", requires_credentials=False, requires_paid_plan_for_live=True,
-                notes="Historical & delayed quotes available via yfinance (.T); real-time requires paid EODHD/Twelve Data.",
+                notes="Historical & delayed quotes available via yfinance (.T); real-time requires paid EODHD/Twelve Data." + global_note_suffix,
             ),
             ExchangeCoverageEntry(
                 exchange_mic="XHKG", exchange_acronym="HKEX", exchange_name="Hong Kong Exchanges and Clearing",
                 region="Asia", country="Hong Kong", currency="HKD", timezone="Asia/Hong_Kong",
                 phase="Phase 7", coverage_status=global_cov_status, quote_data_status=global_quote_status,
                 historical_data_status=global_hist_status,
-                primary_provider="Twelve Data (Live Global)" if self.twelvedata.is_configured() else ("EODHD (Live Global)" if self.eodhd.is_configured() else "yfinance (Delayed)"),
+                primary_provider=global_primary,
                 fallback_provider="yfinance (.HK)", requires_credentials=False, requires_paid_plan_for_live=True,
-                notes="Historical & delayed quotes available via yfinance (.HK); real-time requires paid EODHD/Twelve Data.",
+                notes="Historical & delayed quotes available via yfinance (.HK); real-time requires paid EODHD/Twelve Data." + global_note_suffix,
             ),
             ExchangeCoverageEntry(
                 exchange_mic="XSES", exchange_acronym="SGX", exchange_name="Singapore Exchange",
                 region="Southeast Asia", country="Singapore", currency="SGD", timezone="Asia/Singapore",
                 phase="Phase 7", coverage_status=global_cov_status, quote_data_status=global_quote_status,
                 historical_data_status=global_hist_status,
-                primary_provider="Twelve Data (Live Global)" if self.twelvedata.is_configured() else ("EODHD (Live Global)" if self.eodhd.is_configured() else "yfinance (Delayed)"),
+                primary_provider=global_primary,
                 fallback_provider="yfinance (.SI)", requires_credentials=False, requires_paid_plan_for_live=True,
-                notes="Historical & delayed quotes available via yfinance (.SI); real-time requires paid EODHD/Twelve Data.",
+                notes="Historical & delayed quotes available via yfinance (.SI); real-time requires paid EODHD/Twelve Data." + global_note_suffix,
             ),
             ExchangeCoverageEntry(
                 exchange_mic="XASX", exchange_acronym="ASX", exchange_name="Australian Securities Exchange",
                 region="Oceania", country="Australia", currency="AUD", timezone="Australia/Sydney",
                 phase="Phase 7", coverage_status=global_cov_status, quote_data_status=global_quote_status,
                 historical_data_status=global_hist_status,
-                primary_provider="Twelve Data (Live Global)" if self.twelvedata.is_configured() else ("EODHD (Live Global)" if self.eodhd.is_configured() else "yfinance (Delayed)"),
+                primary_provider=global_primary,
                 fallback_provider="yfinance (.AX)", requires_credentials=False, requires_paid_plan_for_live=True,
-                notes="Historical & delayed quotes available via yfinance (.AX); real-time requires paid EODHD/Twelve Data.",
+                notes="Historical & delayed quotes available via yfinance (.AX); real-time requires paid EODHD/Twelve Data." + global_note_suffix,
             ),
         ]
