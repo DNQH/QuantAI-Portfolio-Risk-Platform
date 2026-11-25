@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Area,
   AreaChart,
@@ -56,6 +56,46 @@ const NAV_ITEMS: Array<{ key: TabKey; label: string }> = [
   { key: 'crowdSentiment', label: 'What People Think?' },
   { key: 'coverage', label: en.nav.coverage },
 ];
+
+// URL hash slug for each tab, e.g. http://localhost:5173/#risk-analytics.
+// Keeping the active tab in the URL makes it survive a refresh, enables the
+// browser Back/Forward buttons, and lets a specific tab be bookmarked/shared.
+const TAB_SLUGS: Record<TabKey, string> = {
+  overview: 'overview',
+  marketData: 'market-data',
+  riskTracker: 'risk-tracker',
+  portfolio: 'portfolio',
+  risk: 'risk-analytics',
+  fx: 'fx',
+  crowdSentiment: 'sentiment',
+  coverage: 'coverage',
+};
+const DEFAULT_TAB: TabKey = 'overview';
+
+const tabFromHash = (hash: string): TabKey => {
+  const slug = decodeURIComponent(hash.replace(/^#\/?/, '')).toLowerCase();
+  const match = (Object.keys(TAB_SLUGS) as TabKey[]).find((k) => TAB_SLUGS[k] === slug);
+  return match ?? DEFAULT_TAB;
+};
+
+/** Active tab state mirrored to `location.hash` (one history entry per tab switch). */
+function useHashTab(): [TabKey, (next: TabKey) => void] {
+  const [tab, setTab] = useState<TabKey>(() => tabFromHash(window.location.hash));
+
+  useEffect(() => {
+    const onHashChange = () => setTab(tabFromHash(window.location.hash));
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  const navigate = useCallback((next: TabKey) => {
+    setTab(next);
+    const target = `#${TAB_SLUGS[next]}`;
+    if (window.location.hash !== target) window.location.hash = target;
+  }, []);
+
+  return [tab, navigate];
+}
 
 const INTERVALS = ['1m', '5m', '15m', '1h', '1d', '1wk', '1mo'] as const;
 const PERIODS: Array<{ label: string; value: string }> = [
@@ -121,7 +161,7 @@ const fmtNum = (v: number | null | undefined, digits = 2) => (v == null ? 'N/A' 
 
 export const App: React.FC = () => {
   const [darkMode, setDarkMode] = useState(true);
-  const [activeTab, setActiveTab] = useState<TabKey>('overview');
+  const [activeTab, setActiveTab] = useHashTab();
   const [searchQuery, setSearchQuery] = useState('');
   const [marketSelection, setMarketSelection] = useState<MarketSelection>({ country: 'ALL', exchangeMic: 'ALL', label: 'All Markets' });
   const [instruments, setInstruments] = useState<Instrument[]>([]);
@@ -338,6 +378,24 @@ export const App: React.FC = () => {
 
   const histVar95 = riskData?.var_results.find((v) => v.method === 'historical' && Math.abs(v.confidence_level - 0.95) < 0.01);
   const currentNav = NAV_ITEMS.find((n) => n.key === activeTab);
+
+  useEffect(() => {
+    document.title = `${currentNav?.label ?? en.nav.overview} · ${en.brand.name}`;
+    // On narrow screens the nav is a horizontal strip: keep the active tab visible.
+    // Re-run whenever the button resizes (e.g. web fonts finishing loading after first paint).
+    const active = document.querySelector<HTMLElement>('aside nav [aria-current="page"]');
+    if (!active) return;
+    const reveal = () => active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    reveal();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(reveal);
+    observer.observe(active);
+    const stop = window.setTimeout(() => observer.disconnect(), 3000);
+    return () => {
+      window.clearTimeout(stop);
+      observer.disconnect();
+    };
+  }, [currentNav]);
   const shellBg = darkMode ? 'bg-terminal-bg text-slate-100' : 'bg-slate-50 text-slate-900';
   const panelBg = darkMode ? 'bg-terminal-surface border-terminal-border' : 'bg-white border-slate-200';
 
