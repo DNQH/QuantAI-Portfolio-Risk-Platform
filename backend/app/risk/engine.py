@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from scipy.stats import norm
 
 from app.analytics.returns import drawdown_analysis, sharpe_ratio, sortino_ratio
@@ -55,6 +55,15 @@ class RiskAnalysisRequest(BaseModel):
     periods_per_year: int = Field(default=252, ge=1, le=365)
     currency_weights: Dict[str, float] = Field(default_factory=dict)
 
+    @validator("confidence_levels")
+    def _check_confidence_levels(cls, v: List[float]) -> List[float]:
+        if not v:
+            raise ValueError("At least one confidence level is required.")
+        for alpha in v:
+            if not (0.5 < alpha < 1.0):
+                raise ValueError(f"Confidence level must be in (0.5, 1.0), got {alpha}.")
+        return v
+
 
 class RiskAnalysisResponse(BaseModel):
     computed_at_utc: datetime
@@ -72,11 +81,32 @@ class RiskAnalysisResponse(BaseModel):
     assumptions: List[str]
 
 
+def _expected_shortfall_from_sample(sample: np.ndarray, alpha: float) -> float:
+    """Acerbi-Tasche (2002) empirical Expected Shortfall of the left tail (returned as a return, <= VaR return).
+
+    ES = (1 / (n * a)) * [ sum_{i < k} x_(i) + (n * a - k) * x_(k) ],  a = 1 - alpha, k = floor(n * a)
+
+    Unlike ``mean(x[x <= q])`` this estimator always averages exactly the worst (1 - alpha)
+    probability mass (fractional weight on the boundary observation), so it is coherent and
+    does not jump discontinuously with the quantile interpolation scheme.
+    """
+    x = np.sort(np.asarray(sample, dtype=float))
+    n = x.size
+    tail_mass = n * (1.0 - alpha)
+    k = int(math.floor(tail_mass))
+    k = min(k, n - 1)
+    total = float(np.sum(x[:k])) + (tail_mass - k) * float(x[k])
+    return total / tail_mass
+
+
 def _historical_var_cvar(rets: np.ndarray, alpha: float, horizon: int) -> tuple[float, float]:
-    scaled = rets * math.sqrt(horizon)
+    # Horizon scaling consistent with the parametric method: drift scales with T,
+    # the de-meaned shock scales with sqrt(T) (i.i.d. assumption). For T = 1 this is
+    # exactly the raw empirical distribution.
+    mu = float(np.mean(rets))
+    scaled = mu * horizon + (rets - mu) * math.sqrt(horizon)
     q = float(np.quantile(scaled, 1.0 - alpha))
-    tail = scaled[scaled <= q]
-    es = float(np.mean(tail)) if len(tail) > 0 else q
+    es = _expected_shortfall_from_sample(scaled, alpha)
     return max(0.0, -q), max(0.0, -es)
 
 
@@ -84,8 +114,9 @@ def _parametric_var_cvar(rets: np.ndarray, alpha: float, horizon: int) -> tuple[
     mu = float(np.mean(rets)) * horizon
     sigma = float(np.std(rets, ddof=1)) * math.sqrt(horizon)
     z = float(norm.ppf(alpha))
+    # VaR_alpha = -(mu - z * sigma) ; returned as a positive loss fraction.
     var = max(0.0, -(mu - z * sigma))
-    # Analytical Expected Shortfall for Normal distribution: -mu + sigma * phi(z) / (1 - alpha)
+    # Analytical Normal Expected Shortfall: ES = -mu + sigma * phi(z) / (1 - alpha)
     cvar = max(var, -(mu - sigma * float(norm.pdf(z)) / (1.0 - alpha)))
     return var, cvar
 
@@ -98,16 +129,27 @@ def _monte_carlo_var_cvar(
     rng = np.random.default_rng(seed)
     simulated = rng.normal(loc=mu, scale=sigma, size=n_sim)
     q = float(np.quantile(simulated, 1.0 - alpha))
-    tail = simulated[simulated <= q]
-    es = float(np.mean(tail)) if len(tail) > 0 else q
+    es = _expected_shortfall_from_sample(simulated, alpha)
     return max(0.0, -q), max(0.0, -es)
 
 
 def run_risk_analysis(req: RiskAnalysisRequest) -> RiskAnalysisResponse:
-    arr = np.asarray(req.returns, dtype=float)
+    raw = np.asarray(req.returns, dtype=float)
+    finite_mask = np.isfinite(raw)
+    if req.benchmark_returns is not None:
+        if len(req.benchmark_returns) != len(req.returns):
+            raise ValueError("benchmark_returns must match length of returns.")
+        bench_raw = np.asarray(req.benchmark_returns, dtype=float)
+        finite_mask &= np.isfinite(bench_raw)
+    if np.any(raw[finite_mask] < -1.0):
+        raise ValueError("Simple returns cannot be below -100% (found a return < -1.0).")
+    arr = raw[finite_mask]
+    dropped = int(raw.size - arr.size)
+    if arr.size < 10:
+        raise ValueError(f"At least 10 finite return observations are required (got {arr.size}).")
     vol_ann = float(np.std(arr, ddof=1)) * math.sqrt(req.periods_per_year)
-    sr = sharpe_ratio(req.returns, req.risk_free_rate_annual, req.periods_per_year)
-    sor = sortino_ratio(req.returns, req.risk_free_rate_annual, req.periods_per_year)
+    sr = sharpe_ratio(arr.tolist(), req.risk_free_rate_annual, req.periods_per_year)
+    sor = sortino_ratio(arr.tolist(), req.risk_free_rate_annual, req.periods_per_year)
 
     # Reconstruct wealth curve for drawdown
     wealth = [1.0]
@@ -118,9 +160,7 @@ def run_risk_analysis(req: RiskAnalysisRequest) -> RiskAnalysisResponse:
     tracking_err: Optional[float] = None
     info_ratio: Optional[float] = None
     if req.benchmark_returns is not None:
-        if len(req.benchmark_returns) != len(req.returns):
-            raise ValueError("benchmark_returns must match length of returns.")
-        active = arr - np.asarray(req.benchmark_returns, dtype=float)
+        active = arr - np.asarray(req.benchmark_returns, dtype=float)[finite_mask]
         te_val = float(np.std(active, ddof=1)) * math.sqrt(req.periods_per_year)
         tracking_err = te_val
         if te_val > 1e-12:
@@ -128,8 +168,6 @@ def run_risk_analysis(req: RiskAnalysisRequest) -> RiskAnalysisResponse:
 
     var_results: List[VaRMethodResult] = []
     for alpha in req.confidence_levels:
-        if not (0.5 < alpha < 1.0):
-            raise ValueError(f"Confidence level must be in (0.5, 1.0), got {alpha}.")
         for method_name, fn in (
             ("historical", lambda a=alpha: _historical_var_cvar(arr, a, req.horizon_days)),
             ("parametric_normal", lambda a=alpha: _parametric_var_cvar(arr, a, req.horizon_days)),
@@ -184,9 +222,11 @@ def run_risk_analysis(req: RiskAnalysisRequest) -> RiskAnalysisResponse:
         stress_scenarios=stress_scenarios,
         currency_exposure=req.currency_weights,
         assumptions=[
-            "Historical VaR/CVaR uses empirical return quantiles without distributional assumptions; multi-day scaling uses sqrt(T).",
+            "Historical VaR uses the empirical (linearly interpolated) return quantile; CVaR uses the Acerbi-Tasche tail-mass estimator.",
+            "Multi-day horizons scale the mean by T and de-meaned shocks by sqrt(T) (i.i.d. assumption) for every method.",
             "Parametric VaR/CVaR assumes normally distributed i.i.d. returns and may underestimate fat-tail risk.",
             f"Monte Carlo VaR/CVaR runs {req.monte_carlo_simulations} deterministic seeded (seed={req.monte_carlo_seed}) normal draws.",
             "Stress scenarios apply transparent deterministic portfolio-level shocks for sensitivity illustration.",
-        ],
+        ]
+        + ([f"Dropped {dropped} non-finite return observation(s) before analysis."] if dropped else []),
     )

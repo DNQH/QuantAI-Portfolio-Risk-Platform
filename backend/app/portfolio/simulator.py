@@ -26,6 +26,9 @@ from app.backtesting.engine import (
 from app.core.models import OHLCVBar
 
 
+DRIFT_SHRINKAGE = 0.75
+
+
 class StockAllocationItem(BaseModel):
     instrument_id: str
     ticker: str
@@ -107,16 +110,11 @@ def run_portfolio_10y_simulation(
     bt = run_portfolio_backtest(bt_req)
     meta = metadata_map or {}
 
-    # Compute individual stock annualized volatilities for Diversification Ratio & Risk Reduction %
-    indiv_vols: Dict[str, float] = {}
-    for iid in bt.instrument_ids:
-        bars = sorted((req.asset_series or {}).get(iid, []), key=lambda b: b.timestamp)
-        closes = [float(b.adjusted_close if b.adjusted_close is not None else b.close) for b in bars if b.close > 0]
-        if len(closes) >= 20:
-            rets = np.diff(closes) / np.array(closes[:-1])
-            indiv_vols[iid] = float(np.std(rets, ddof=1)) * math.sqrt(252.0)
-        else:
-            indiv_vols[iid] = bt.annualized_volatility
+    # Individual stock volatilities measured on the SAME aligned evaluation window and with the
+    # same annualisation factor as the portfolio volatility (previously each stock used its own
+    # full, unaligned history and a hard-coded 252, which made the Diversification Ratio and
+    # Risk Reduction % compare volatilities from different samples).
+    indiv_vols: Dict[str, float] = dict(bt.asset_annualized_volatility)
 
     allocations: List[StockAllocationItem] = []
     weighted_avg_vol = 0.0
@@ -144,16 +142,22 @@ def run_portfolio_10y_simulation(
     risk_red = max(0.0, (weighted_avg_vol - port_vol) / weighted_avg_vol) if weighted_avg_vol > 0 else 0.0
 
     # Seeded Monte Carlo Forward Scenario Projections (1Y, 3Y, 5Y)
-    # Use conservative drift shrinkage (0.65 * historical CAGR, capped to [-5%, +16%]) so projections stay realistic
-    mu_hist = max(-0.05, min(0.16, bt.cagr * 0.75))
+    # Conservative drift shrinkage: 0.75 * historical CAGR, capped to [-5%, +16%].
+    shrunk_cagr = max(-0.05, min(0.16, bt.cagr * DRIFT_SHRINKAGE))
     sigma_ann = max(0.06, min(0.65, port_vol))
+    # CAGR is already a GEOMETRIC (median) growth rate, i.e. it is net of volatility drag.
+    # The continuously-compounded drift of log-wealth is therefore g = ln(1 + CAGR) and
+    # W_T = W_0 * exp(g*T + sigma*sqrt(T)*Z). Subtracting 0.5*sigma^2 again (as the
+    # arithmetic-drift GBM formula does) would double-count the drag and bias every
+    # percentile down by ~sigma^2/2 per year.
+    log_drift = math.log1p(shrunk_cagr)
     rng = np.random.default_rng(42)
     n_paths = 5000
 
     forward_scenarios: List[ForwardScenarioHorizon] = []
     for horizon in (1, 3, 5):
         z = rng.normal(0.0, 1.0, size=n_paths)
-        growth = np.exp((mu_hist - 0.5 * sigma_ann * sigma_ann) * horizon + sigma_ann * math.sqrt(horizon) * z)
+        growth = np.exp(log_drift * horizon + sigma_ann * math.sqrt(horizon) * z)
         end_vals = req.capital * growth
         bear_v = float(np.percentile(end_vals, 10))
         base_v = float(np.percentile(end_vals, 50))
@@ -210,7 +214,7 @@ def run_portfolio_10y_simulation(
         forward_scenarios=forward_scenarios,
         pm_verdict=pm_verdict,
         assumptions=bt.assumptions + [
-            "Forward 1Y/3Y/5Y scenarios run 5,000 seeded Geometric Brownian Motion paths using shrinkage-adjusted historical drift (capped at 16%/yr) and realized portfolio volatility.",
+            "Forward 1Y/3Y/5Y scenarios run 5,000 seeded log-normal paths with log-drift ln(1 + 0.75 x historical CAGR, capped to [-5%, +16%]) and realized portfolio volatility; the median path compounds at the shrunk CAGR.",
             "Bear = 10th percentile, Base = Median (50th percentile), Bull = 90th percentile. Probabilistic simulations are not guaranteed future returns.",
         ],
     )

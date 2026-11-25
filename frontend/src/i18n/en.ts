@@ -1,11 +1,11 @@
 /**
- * English-only UI string catalog (v1.5.0).
+ * English-only UI string catalog.
  */
 export const en = {
   brand: {
     name: 'QuantAI',
     subtitle: 'Global Quantitative Investment Research & Financial Risk Platform',
-    phaseBadge: 'v1.5.0 · Full Suite',
+    phaseBadge: 'v4.1.0 · Full Suite',
   },
   nav: {
     overview: 'Overview Dashboard',

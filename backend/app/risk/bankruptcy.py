@@ -16,16 +16,48 @@ Implements the 4-stage institutional credit risk architecture:
 
 from __future__ import annotations
 
+import functools
 import logging
 import math
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from datetime import datetime, timezone
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 from pydantic import BaseModel, Field
+from scipy.special import expit
 from scipy.stats import norm
 
 logger = logging.getLogger("quantai.bankruptcy")
+
+# Ohlson (1980) SIZE = log(Total Assets / GNP price-level index), index base 1968 = 100 and
+# total assets in US dollars. 626 ~= US GDP implicit price deflator 2025 relative to 1968 (x100).
+OHLSON_GNP_PRICE_INDEX = 626.0
+
+# Approximate reference units of currency per 1 USD (late-2025 levels). Only used to put the
+# Ohlson SIZE term on a USD basis: it enters through log(), so a 10% FX error moves the O-score
+# by ~0.04, whereas ignoring the currency entirely (e.g. VND vs USD) shifted it by ~4.1.
+APPROX_UNITS_PER_USD: Dict[str, float] = {
+    "USD": 1.0,
+    "EUR": 0.86,
+    "GBP": 0.76,
+    "CHF": 0.80,
+    "JPY": 155.0,
+    "HKD": 7.78,
+    "SGD": 1.30,
+    "AUD": 1.53,
+    "KRW": 1450.0,
+    "IDR": 16600.0,
+    "THB": 32.5,
+    "VND": 26300.0,
+    "CNY": 7.12,
+    "INR": 88.5,
+    "CAD": 1.40,
+}
+
+YFINANCE_FINANCIALS_TIMEOUT_SECONDS = 15.0
+_YF_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="yf-financials")
 
 
 class FinancialStatementInputs(BaseModel):
@@ -97,6 +129,31 @@ def _safe_div(num: float, den: float, default: float = 0.0) -> float:
     if abs(den) < 1e-9:
         return default
     return num / den
+
+
+def _logistic(x: float) -> float:
+    """Numerically stable 1 / (1 + exp(-x)); math.exp overflowed for debt-free firms (DSCR ~ 1e8)."""
+    return float(expit(x))
+
+
+def _bounded_ratio(num: float, den: float, cap: float) -> float:
+    """num / den clipped to [-cap, cap]; a (near-)zero denominator maps to +cap if num > 0 else 0.
+
+    Replaces the previous ``num / max(den, 1.0)`` pattern, which silently turned a zero
+    denominator into "divide by one currency unit" (e.g. an interest coverage of 8e10x).
+    """
+    if den <= 1e-9:
+        return cap if num > 0 else 0.0
+    return max(-cap, min(cap, num / den))
+
+
+def ohlson_size_term(total_assets: float, currency: str) -> Tuple[float, bool]:
+    """Ohlson SIZE = ln(TA_USD / GNP price-level index). Returns (size, currency_known)."""
+    ccy = (currency or "USD").upper()
+    units = APPROX_UNITS_PER_USD.get(ccy)
+    known = units is not None
+    ta_usd = total_assets / (units if known else 1.0)
+    return math.log(max(ta_usd, 1e-9) / OHLSON_GNP_PRICE_INDEX), known
 
 
 def _extract_yf_financials(
@@ -176,6 +233,18 @@ def _extract_yf_financials(
         return None
 
 
+def _extract_yf_financials_with_timeout(
+    ticker: str, exchange_mic: str, equity_vol: Optional[float], timeout: float = YFINANCE_FINANCIALS_TIMEOUT_SECONDS
+) -> Optional[tuple[FinancialStatementInputs, str, str]]:
+    """yfinance exposes no request timeout for statements; bound the wall-clock wait here."""
+    future = _YF_EXECUTOR.submit(_extract_yf_financials, ticker, exchange_mic, equity_vol)
+    try:
+        return future.result(timeout=timeout)
+    except FutureTimeoutError:
+        logger.warning("yfinance financial statements for %s timed out after %.0fs; using baseline.", ticker, timeout)
+        return None
+
+
 def _baseline_financials(ticker: str, equity_vol: Optional[float]) -> FinancialStatementInputs:
     """Deterministic representative baseline when live corporate filings are unreachable."""
     seed = sum(ord(ch) for ch in ticker.upper()) % 17
@@ -212,12 +281,24 @@ def _baseline_financials(ticker: str, equity_vol: Optional[float]) -> FinancialS
 def _merton_distance_to_default(
     market_cap: float, total_debt: float, equity_vol: float, rf: float, horizon_years: float = 1.0
 ) -> tuple[float, float]:
-    """1974 Black-Scholes-Merton structural credit model (1-year default boundary)."""
-    # Moody's KMV convention: default point = short-term debt + 0.5 * long-term debt (~0.75 * total_debt)
+    """Naive Merton distance-to-default (Bharath & Shumway, 2008), 1-year horizon.
+
+    F   = default point (KMV convention ~ short-term debt + 0.5 * long-term debt ~ 0.75 * total debt)
+    V   = E + F
+    sD  = 0.05 + 0.25 * sE                       (debt is risky, not riskless)
+    sV  = (E / V) * sE + (F / V) * sD
+    DD  = [ln(V / F) + (r - 0.5 * sV^2) * T] / (sV * sqrt(T)),   PD = N(-DD)
+
+    The previous version used sV = sE * E / V, i.e. it treated debt as riskless, which
+    understates asset volatility -- and therefore PD -- precisely for highly levered firms.
+    """
     default_point = max(total_debt * 0.75, market_cap * 0.02)
     asset_val = market_cap + default_point
-    # Approximate asset volatility from equity volatility via leverage scaling
-    asset_vol = max(0.05, equity_vol * (market_cap / asset_val))
+    debt_vol = 0.05 + 0.25 * equity_vol
+    asset_vol = max(
+        0.05,
+        (market_cap / asset_val) * equity_vol + (default_point / asset_val) * debt_vol,
+    )
     dd = (
         math.log(asset_val / default_point)
         + (rf - 0.5 * asset_vol * asset_vol) * horizon_years
@@ -226,8 +307,7 @@ def _merton_distance_to_default(
     return dd, max(0.0005, min(0.95, pd_12m))
 
 
-def _fit_gbdt_credit_pd(features: np.ndarray) -> tuple[float, str]:
-    """Run XGBoost (if installed) or Gradient Boosted Credit Trees calibrated on financial distress ratios."""
+def _synthetic_credit_training_set() -> Tuple[np.ndarray, np.ndarray]:
     rng = np.random.default_rng(42)
     n_samples = 600
     # Synthetic Moody's/S&P-style corporate ratio training matrix:
@@ -251,45 +331,47 @@ def _fit_gbdt_credit_pd(features: np.ndarray) -> tuple[float, str]:
     )
     true_prob = 1.0 / (1.0 + np.exp(-true_logit))
     y_train = (rng.uniform(0, 1, n_samples) < true_prob).astype(int)
+    return X_train, y_train
 
-    # Prefer xgboost if installed in user's local venv, else sklearn GradientBoostingClassifier
+
+@functools.lru_cache(maxsize=1)
+def _trained_gbdt_classifier() -> Tuple[Optional[Any], str]:
+    """Train the boosted-tree PD classifier ONCE per process (was retrained on every request)."""
+    X_train, y_train = _synthetic_credit_training_set()
     try:
         import xgboost as xgb  # type: ignore
 
-        clf = xgb.XGBClassifier(
-            n_estimators=60,
-            max_depth=3,
-            learning_rate=0.08,
-            random_state=42,
-            eval_metric="logloss",
-        )
+        clf = xgb.XGBClassifier(n_estimators=60, max_depth=3, learning_rate=0.08, random_state=42, eval_metric="logloss")
         clf.fit(X_train, y_train)
-        prob = float(clf.predict_proba(features.reshape(1, -1))[0, 1])
-        return max(0.001, min(0.95, prob)), "XGBoost Credit PD"
+        return clf, "XGBoost Credit PD"
     except Exception:
         pass
-
     try:
         from sklearn.ensemble import GradientBoostingClassifier  # type: ignore
 
-        clf = GradientBoostingClassifier(
-            n_estimators=60, max_depth=3, learning_rate=0.08, random_state=42
-        )
+        clf = GradientBoostingClassifier(n_estimators=60, max_depth=3, learning_rate=0.08, random_state=42)
         clf.fit(X_train, y_train)
-        prob = float(clf.predict_proba(features.reshape(1, -1))[0, 1])
-        return max(0.001, min(0.95, prob)), "XGBoost / Gradient Boosted Trees PD"
+        return clf, "Gradient Boosted Trees PD (scikit-learn)"
     except Exception:
-        # Pure NumPy fallback (smooth non-linear tree-style interaction)
-        logit = (
-            -1.35 * (features[0] - 1.3)
-            + 4.20 * (features[1] - 0.62)
-            - 8.50 * features[2]
-            - 1.10 * (features[3] - 1.1)
-            - 2.20 * (features[4] - 0.20)
-            + 2.40 * (features[5] - 0.35)
-            - 1.25
-        )
-        return max(0.001, min(0.95, float(1.0 / (1.0 + math.exp(-logit))))), "XGBoost / GBDT Credit PD"
+        return None, "Boosted-Tree PD (logistic surrogate: xgboost/scikit-learn not installed)"
+
+
+def _fit_gbdt_credit_pd(features: np.ndarray) -> tuple[float, str]:
+    """Score with XGBoost / sklearn GBDT trained on a synthetic ratio panel, or a logistic surrogate."""
+    clf, label = _trained_gbdt_classifier()
+    if clf is not None:
+        prob = float(clf.predict_proba(features.reshape(1, -1))[0, 1])
+        return max(0.001, min(0.95, prob)), label
+    logit = (
+        -1.35 * (features[0] - 1.3)
+        + 4.20 * (features[1] - 0.62)
+        - 8.50 * features[2]
+        - 1.10 * (features[3] - 1.1)
+        - 2.20 * (features[4] - 0.20)
+        + 2.40 * (features[5] - 0.35)
+        - 1.25
+    )
+    return max(0.001, min(0.95, float(_logistic(logit)))), label
 
 
 def run_bankruptcy_pipeline(
@@ -310,7 +392,7 @@ def run_bankruptcy_pipeline(
         fin = req.override_financials
         data_source = "user_override"
     else:
-        yf_res = _extract_yf_financials(ticker, mic, req.equity_volatility_annual)
+        yf_res = _extract_yf_financials_with_timeout(ticker, mic, req.equity_volatility_annual)
         if yf_res is not None:
             fin, company_name, currency = yf_res
             data_source = "yfinance_corporate_filings"
@@ -323,19 +405,19 @@ def run_bankruptcy_pipeline(
     x1_wc_ta = _safe_div(wc, fin.total_assets)
     x2_re_ta = _safe_div(fin.retained_earnings, fin.total_assets)
     x3_ebit_ta = _safe_div(fin.ebit, fin.total_assets)
-    x4_mcap_tl = _safe_div(fin.market_cap, max(fin.total_liabilities, 1.0))
+    x4_mcap_tl = _bounded_ratio(fin.market_cap, fin.total_liabilities, cap=100.0)
     x5_rev_ta = _safe_div(fin.revenue, fin.total_assets)
 
-    current_ratio = _safe_div(fin.current_assets, max(fin.current_liabilities, 1.0), default=1.5)
+    current_ratio = _bounded_ratio(fin.current_assets, fin.current_liabilities, cap=50.0)
     tl_ta = _safe_div(fin.total_liabilities, fin.total_assets)
     equity_book = max(fin.total_assets - fin.total_liabilities, 1.0)
     debt_to_equity = _safe_div(fin.total_debt, equity_book)
     roa = _safe_div(fin.net_income, fin.total_assets)
-    ocf_to_debt = _safe_div(fin.operating_cash_flow, max(fin.total_debt, 1.0), default=0.5)
-    interest_coverage = _safe_div(fin.ebit, max(fin.interest_expense, 1.0), default=12.0)
+    ocf_to_debt = _bounded_ratio(fin.operating_cash_flow, fin.total_debt, cap=5.0)
+    interest_coverage = _bounded_ratio(fin.ebit, fin.interest_expense, cap=999.0)
     # Annual debt service ≈ interest expense + 15% assumed annual principal amortization
-    annual_debt_service = max(fin.interest_expense + 0.15 * fin.total_debt, 1.0)
-    dscr = _safe_div(fin.ebitda, annual_debt_service, default=3.0)
+    annual_debt_service = fin.interest_expense + 0.15 * fin.total_debt
+    dscr = _bounded_ratio(fin.ebitda, annual_debt_service, cap=999.0)
 
     variables = [
         FinancialVariableItem(
@@ -399,18 +481,18 @@ def run_bankruptcy_pipeline(
     # --- Stage 3: 7 Credit & Bankruptcy Models ---
     # 1. Altman Z-Score (1968)
     z_score = 1.2 * x1_wc_ta + 1.4 * x2_re_ta + 3.3 * x3_ebit_ta + 0.6 * x4_mcap_tl + 1.0 * x5_rev_ta
-    z_pd = max(0.002, min(0.92, 1.0 / (1.0 + math.exp(1.15 * (z_score - 1.81)))))
+    z_pd = max(0.002, min(0.92, _logistic(-(1.15 * (z_score - 1.81)))))
     z_zone: Literal["SAFE", "WATCH", "DISTRESS"] = (
         "SAFE" if z_score >= 2.99 else ("WATCH" if z_score >= 1.81 else "DISTRESS")
     )
 
     # 2. Ohlson O-Score (1980)
-    size_log = math.log(max(fin.total_assets / 1000.0, 1.0))
-    cl_ca = _safe_div(fin.current_liabilities, max(fin.current_assets, 1.0), default=0.7)
+    size_log, ccy_known = ohlson_size_term(fin.total_assets, currency)
+    cl_ca = _bounded_ratio(fin.current_liabilities, fin.current_assets, cap=10.0)
     oeneg = 1.0 if fin.total_liabilities > fin.total_assets else 0.0
     intwo = 1.0 if (fin.net_income < 0 and fin.prev_net_income < 0) else 0.0
     chin = _safe_div(fin.net_income - fin.prev_net_income, abs(fin.net_income) + abs(fin.prev_net_income) + 1e-6)
-    ffo_tl = _safe_div(fin.operating_cash_flow, max(fin.total_liabilities, 1.0))
+    ffo_tl = _bounded_ratio(fin.operating_cash_flow, fin.total_liabilities, cap=10.0)
     o_score = (
         -1.32
         - 0.407 * size_log
@@ -423,7 +505,7 @@ def run_bankruptcy_pipeline(
         + 0.285 * intwo
         - 0.521 * chin
     )
-    o_pd = max(0.001, min(0.95, 1.0 / (1.0 + math.exp(-o_score))))
+    o_pd = max(0.001, min(0.95, _logistic(o_score)))
     o_zone: Literal["SAFE", "WATCH", "DISTRESS"] = (
         "SAFE" if o_pd < 0.05 else ("WATCH" if o_pd < 0.20 else "DISTRESS")
     )
@@ -437,14 +519,14 @@ def run_bankruptcy_pipeline(
     )
 
     # 4. DSCR
-    dscr_pd = max(0.005, min(0.85, 1.0 / (1.0 + math.exp(1.8 * (dscr - 1.15)))))
+    dscr_pd = max(0.005, min(0.85, _logistic(-(1.8 * (dscr - 1.15)))))
     dscr_zone: Literal["SAFE", "WATCH", "DISTRESS"] = (
         "SAFE" if dscr >= 1.5 else ("WATCH" if dscr >= 1.1 else "DISTRESS")
     )
 
     # 5. Interest Coverage Ratio
     ic_capped = min(interest_coverage, 50.0)
-    ic_pd = max(0.003, min(0.88, 1.0 / (1.0 + math.exp(0.95 * (ic_capped - 1.8)))))
+    ic_pd = max(0.003, min(0.88, _logistic(-(0.95 * (ic_capped - 1.8)))))
     ic_zone: Literal["SAFE", "WATCH", "DISTRESS"] = (
         "SAFE" if interest_coverage >= 4.0 else ("WATCH" if interest_coverage >= 1.5 else "DISTRESS")
     )
@@ -460,7 +542,7 @@ def run_bankruptcy_pipeline(
         + 2.10 * (fin.equity_volatility_annual - 0.35)
         - 1.35
     )
-    logit_pd = max(0.001, min(0.95, 1.0 / (1.0 + math.exp(-logit_pd_raw))))
+    logit_pd = max(0.001, min(0.95, _logistic(logit_pd_raw)))
     logit_zone: Literal["SAFE", "WATCH", "DISTRESS"] = (
         "SAFE" if logit_pd < 0.05 else ("WATCH" if logit_pd < 0.18 else "DISTRESS")
     )
@@ -488,7 +570,7 @@ def run_bankruptcy_pipeline(
             raw_score_formatted=f"O = {o_score:.2f}",
             implied_pd_12m=round(o_pd, 4),
             zone=o_zone,
-            formula_summary="9-factor logistic score combining size, leverage, liquidity, ROA, and cash flow",
+            formula_summary="9-factor logistic score; SIZE = ln(Total Assets in USD / GNP price index, 1968 = 100)",
             plain_english=f"Direct logistic bankruptcy probability: {o_pd*100:.1f}% over the next 12 months.",
         ),
         CreditModelResult(
@@ -497,7 +579,7 @@ def run_bankruptcy_pipeline(
             raw_score_formatted=f"DD = {dd:.2f}σ",
             implied_pd_12m=round(merton_pd, 4),
             zone=merton_zone,
-            formula_summary="Distance-to-Default DD = [ln(V_A/D) + (r − 0.5σ_A²)T] / (σ_A√T); PD = N(−DD)",
+            formula_summary="Naive Merton (Bharath-Shumway): σ_A = (E/V)σ_E + (F/V)(0.05 + 0.25σ_E); DD = [ln(V/F) + (r − 0.5σ_A²)T] / (σ_A√T); PD = N(−DD)",
             plain_english=f"Firm asset value sits {dd:.2f} standard deviations above its default boundary.",
         ),
         CreditModelResult(
@@ -589,5 +671,11 @@ def run_bankruptcy_pipeline(
             "Ensemble 12M PD averages Altman Z-Score, Ohlson O-Score, Merton Structural DD, Logistic Regression, and XGBoost/GBDT.",
             "DSCR and Interest Coverage are displayed alongside the probabilistic models as debt-service covenant guardrails.",
             "Financial institutions (banks/insurers) naturally carry higher balance-sheet leverage; interpret Altman Z-Score cautiously for banks.",
-        ],
+            "Altman Z, DSCR and Interest-Coverage PD mappings are monotone logistic heuristics, not empirically calibrated default frequencies.",
+        ]
+        + (
+            []
+            if ccy_known
+            else [f"Currency {currency} has no reference FX rate; Ohlson SIZE assumes amounts are in USD."]
+        ),
     )

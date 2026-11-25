@@ -7,6 +7,7 @@ historical OHLCV bars, FX reference rates, portfolio holdings, and provider logs
 from __future__ import annotations
 
 import sqlite3
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, Optional
@@ -80,6 +81,9 @@ class DatabaseManager:
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
         self._mem_conn: Optional[sqlite3.Connection] = None
+        # FastAPI runs sync endpoints in a threadpool; the shared in-memory connection is
+        # created with check_same_thread=False, so access must be serialised explicitly.
+        self._mem_lock = threading.RLock()
         if db_path == ":memory:":
             self._mem_conn = sqlite3.connect(":memory:", check_same_thread=False)
             self._mem_conn.row_factory = sqlite3.Row
@@ -89,19 +93,26 @@ class DatabaseManager:
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
         if self._mem_conn is not None:
-            try:
-                yield self._mem_conn
-                self._mem_conn.commit()
-            except Exception:
-                self._mem_conn.rollback()
-                raise
+            with self._mem_lock:
+                try:
+                    yield self._mem_conn
+                    self._mem_conn.commit()
+                except Exception:
+                    self._mem_conn.rollback()
+                    raise
             return
 
-        conn = sqlite3.connect(self.db_path)
+        # timeout: wait up to 10 s on a locked database instead of failing immediately;
+        # WAL lets readers proceed concurrently with a single writer.
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
         conn.row_factory = sqlite3.Row
         try:
+            conn.execute("PRAGMA journal_mode=WAL")
             yield conn
             conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()
 

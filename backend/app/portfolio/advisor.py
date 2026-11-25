@@ -248,6 +248,7 @@ def _build_standalone_conversational_reply(
     missing_sectors: List[str],
     market_scope: Optional[str],
     portfolio_summary: Optional[str],
+    llm_configured: bool = True,
 ) -> tuple[str, List[str]]:
     q = question.strip().lower()
     clean_syms = [s.split(":", 1)[1] if ":" in s else s for s in active_symbols]
@@ -360,6 +361,12 @@ def _build_standalone_conversational_reply(
     # 5. General / non-portfolio casual message when Gemini is temporarily unavailable (503)
     finance_keywords = ("stock", "portfolio", "risk", "weight", "return", "drawdown", "volatil", "market", "invest", "buy", "sell", "cổ phiếu", "danh mục", "rủi ro", "đầu tư", "tỷ trọng", "lợi nhuận")
     if not any(k in q for k in finance_keywords):
+        if not llm_configured:
+            return (
+                "Free-form conversation needs the optional Gemini integration (GEMINI_API_KEY is not configured on this server). "
+                "I can still answer questions about your stocks, sectors, weights, correlation, hedging and risk — try asking about one of those!",
+                [],
+            )
         return (
             "Gemini is briefly experiencing a temporary high-demand spike right now, so my full conversational mode couldn't connect on that turn. "
             "Hit Send again in a couple of seconds and I'll be right with you!",
@@ -381,6 +388,7 @@ def ask_diverse_risk_advisor(
     gemini_model: str = "gemini-3.1-flash-lite",
     timeout: float = 20.0,
     http_post: Optional[Callable[..., Any]] = None,
+    total_budget_seconds: float = 30.0,
 ) -> DiverseRiskAdvisorResponse:
     active_symbols = req.analysis.symbols if req.analysis is not None else req.selected_stocks
     sector_breakdown, country_breakdown = _lookup_metadata(active_symbols)
@@ -398,6 +406,7 @@ def ask_diverse_risk_advisor(
             missing_sectors,
             req.market_scope,
             req.portfolio_summary,
+            llm_configured=bool(gemini_api_key),
         )
 
     disclaimer = (
@@ -477,15 +486,25 @@ def ask_diverse_risk_advisor(
                 ))
 
         import time as _time
+
+        # Hard wall-clock budget across ALL model/endpoint/retry attempts. Without it the worst
+        # case was len(endpoints) x 2 attempts x timeout (several minutes) per user message.
+        deadline = _time.monotonic() + max(1.0, total_budget_seconds)
         for model_name, url, headers, params in endpoints:
+            if _time.monotonic() >= deadline - 0.5:
+                logger.warning("Gemini time budget (%.0fs) exhausted; using deterministic strategist.", total_budget_seconds)
+                break
             for attempt in range(2):
+                remaining = deadline - _time.monotonic()
+                if remaining <= 0.5:
+                    break
                 try:
                     resp = post_fn(
                         url,
                         headers=headers,
                         params=params,
                         json=gemini_payload,
-                        timeout=timeout,
+                        timeout=min(timeout, remaining),
                     )
                     status = getattr(resp, "status_code", 200)
                     if status == 200:
@@ -517,7 +536,7 @@ def ask_diverse_risk_advisor(
                         _time.sleep(0.9)
                         continue
                     else:
-                        logger.warning("Gemini endpoint %s returned HTTP %s: %s", url, status, getattr(resp, "text", "")[:180])
+                        logger.warning("Gemini endpoint %s returned HTTP %s", url, status)
                         break
                 except Exception as exc:
                     logger.warning("Gemini endpoint %s failed: %s", url, exc)

@@ -48,7 +48,7 @@ class TestPhase2ReturnsAndRiskAdjusted(unittest.TestCase):
     def test_simple_log_cumulative_and_annualized_returns(self) -> None:
         prices = [100.0, 110.0, 99.0, 121.0]
         s = simple_returns(prices)
-        l = log_returns(prices)
+        lr = log_returns(prices)
         c = cumulative_returns(prices)
 
         self.assertIsNone(s[0])
@@ -56,9 +56,9 @@ class TestPhase2ReturnsAndRiskAdjusted(unittest.TestCase):
         self.assertAlmostEqual(s[2], -0.10, places=10)
         self.assertAlmostEqual(s[3], 22.0 / 99.0, places=10)
 
-        self.assertIsNone(l[0])
-        self.assertAlmostEqual(l[1], math.log(1.1), places=10)
-        self.assertAlmostEqual(l[2], math.log(0.9), places=10)
+        self.assertIsNone(lr[0])
+        self.assertAlmostEqual(lr[1], math.log(1.1), places=10)
+        self.assertAlmostEqual(lr[2], math.log(0.9), places=10)
 
         self.assertAlmostEqual(c[0], 0.0, places=10)
         self.assertAlmostEqual(c[-1], 0.21, places=10)
