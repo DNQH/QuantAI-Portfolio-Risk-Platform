@@ -39,7 +39,7 @@
 
 - **Backend:** Python 3.11+, FastAPI, Pydantic, Uvicorn, httpx, SQLite, NumPy, Pandas, SciPy, scikit-learn / XGBoost *(also includes tested modular `analytics/`, `forecasting/`, and `backtesting/` REST APIs)*
 - **Frontend:** React 18, TypeScript, Vite, Tailwind CSS, TradingView Lightweight Charts, Recharts
-- **CI & Automated Testing:** GitHub Actions (`.github/workflows/ci.yml`) — Python 3.11 & 3.13 matrix with `ruff` lint and **69 pytest unit, regression & API tests** + strict TypeScript & Vite production build (code-split, no chunk > 500 kB)
+- **CI & Automated Testing:** GitHub Actions (`.github/workflows/ci.yml`) — Python 3.11 & 3.13 matrix with `ruff` lint and **78 pytest unit, regression & API tests** + Docker build smoke test + strict TypeScript & Vite production build (code-split, no chunk > 500 kB)
 - **Documentation:** `docs/architecture.md`, `docs/data_sources.md`, `docs/financial_formulas.md`, `CHANGELOG.md`
 
 ## Quick Start (Local)
