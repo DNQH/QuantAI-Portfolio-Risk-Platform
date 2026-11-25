@@ -22,16 +22,7 @@ interface Props {
   onAnalyze?: (res: DiverseRiskResponse) => void;
 }
 
-const ALL_MARKETS = [
-  'United States',
-  'Vietnam',
-  'United Kingdom',
-  'Germany',
-  'Japan',
-  'Hong Kong',
-  'Singapore',
-  'Australia',
-] as const;
+const ALL_MARKETS = ['United States', 'Vietnam', 'Italy'] as const;
 
 const ALL_GICS_SECTORS = [
   'Technology',

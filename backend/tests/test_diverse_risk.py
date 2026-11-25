@@ -31,7 +31,7 @@ class _FakeGeminiResp:
                     "content": {
                         "parts": [
                             {
-                                "text": "Combining XNAS:A with XSTC:B and defensive XSWX:DEF reduces volatility."
+                                "text": "Combining XNAS:A with XSTC:B and defensive XMIL:DEF reduces volatility."
                             }
                         ]
                     }
@@ -58,7 +58,7 @@ class TestDiverseRisk(unittest.TestCase):
             pc *= 1.0 + r_a
             pd_ *= 1.0 + r_cand
             a_px[d], b_px[d], c_px[d], cand_px[d] = round(pa, 4), round(pb, 4), round(pc, 4), round(pd_, 4)
-        return {"XNAS:AAPL": a_px, "XSTC:FPT": b_px, "XNAS:MSFT": c_px}, {"XSWX:NESN": cand_px}
+        return {"XNAS:AAPL": a_px, "XSTC:FPT": b_px, "XNAS:MSFT": c_px}, {"XMIL:ENEL": cand_px}
 
     def test_rejects_more_than_10_stocks(self) -> None:
         maps = {f"XNAS:S{k}": {d: 100.0 + i for i, d in enumerate(self.dates)} for k in range(11)}
@@ -109,7 +109,7 @@ class TestDiverseRisk(unittest.TestCase):
         )
         self.assertTrue(llm_res.used_llm)
         self.assertIn("gemini", llm_res.engine_used.lower())
-        self.assertIn("XSWX:DEF", llm_res.answer)
+        self.assertIn("XMIL:DEF", llm_res.answer)
 
 
 

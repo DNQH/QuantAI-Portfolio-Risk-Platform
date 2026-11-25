@@ -26,6 +26,16 @@ All notable changes to **QuantAI** are documented in this file.
   tests (a real Gemini call previously ran from the assistant test).
 
 ### Changed
+- **Market coverage narrowed to three countries:** United States (NYSE, NASDAQ), Vietnam
+  (HOSE, HNX, UPCOM) and **Italy (Borsa Italiana / Euronext Milan, new)**. LSE, Xetra, TSE, HKEX,
+  SGX, ASX, Euronext Paris, SIX, KRX, Bursa Malaysia, IDX and SET were removed from the
+  symbology, instrument catalogue, coverage table, market selector, Portfolio Manager market
+  list, Risk Tracker filters, advisor blueprints and provider maps.
+- **Italy:** 19 FTSE MIB leaders across 10 sectors (`.MI` on yfinance, EUR), a Borsa Italiana
+  trading calendar (08:00 pre-auction, 09:00-17:30 continuous trading Europe/Rome, 2026
+  holidays) and a coverage row (DELAYED via yfinance; real-time needs a paid licensed feed).
+- Instrument search (Yahoo / Twelve Data) now skips exchanges outside the supported set instead
+  of relabelling them as NASDAQ listings.
 - SSI credentials are now `SSI_CONSUMER_ID` / `SSI_CONSUMER_SECRET` (legacy `SSI_API_KEY` /
   `SSI_API_SECRET` still accepted). Provider id `ssi_fastconnect_v3` renamed to
   `ssi_fastconnect_data` (also the key in `/api/v1/health` `configured_providers`).

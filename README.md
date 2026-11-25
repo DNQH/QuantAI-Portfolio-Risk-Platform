@@ -12,7 +12,7 @@
 ## Core Capabilities (v4.1.0)
 
 1. **Global Portfolio Risk Workbench (`backend/app/portfolio/`):**
-   - Multi-market portfolio construction across US, Vietnam, Europe, Asia, and Australia covering **all 11 GICS sectors**, with pre-built low-correlation sector pairings and full custom ticker selection.
+   - Multi-market portfolio construction across the United States, Vietnam and Italy covering **all 11 GICS sectors**, with pre-built low-correlation sector pairings and full custom ticker selection.
    - Hypothetical capital deployment simulator supporting up to **1,000,000,000** across 8 currencies (`USD`, `VND`, `EUR`, `GBP`, `JPY`, `SGD`, `AUD`, `HKD`).
    - SciPy SLSQP **Minimum Variance (GMV)**, **Maximum Sharpe**, and **Equal-Weight** optimization visualized via an interactive allocation Pie Chart, exact per-stock capital weights, Diversification Ratio, and Volatility Reduction %.
    - Integrated **10-Year Historical Performance Proof** (equity curve vs. Equal-Weight Buy & Hold, CAGR, Sharpe, Max Drawdown, calendar-year breakdown) plus **5,000-path seeded Monte Carlo Forward Scenario Forecasts** (1Y / 3Y / 5Y Bear, Base, and Bull regimes).
@@ -31,7 +31,7 @@
    - Computes a transparent **Bayesian-Logistic Horizon Sentiment Model** (`1W`, `1M`, `3M`) outputting a directional verdict (`POSITIVE` / `NEUTRAL` / `NEGATIVE`) and implied positive outlook probability.
 
 5. **Global Market Data Explorer & FX Converter (`backend/app/data/`, `backend/app/fx/`):**
-   - Cascading Country -> Exchange selector (**NYSE, NASDAQ, HOSE, HNX, UPCOM, LSE, Xetra, TSE, HKEX, SGX, ASX** and more) with 10 iconic flagship stocks per exchange and **live global autocomplete search** across tens of thousands of listed equities.
+   - Cascading Country -> Exchange selector (**NYSE, NASDAQ, HOSE, HNX, UPCOM, Borsa Italiana**) with flagship stocks per exchange and **live global autocomplete search** across tens of thousands of listed equities.
    - Multi-provider architecture (`Finnhub`, `Twelve Data`, `SSI FastConnect Data`, `VNDirect dchart`, `TCBS`, `Vnstock v6`, `yfinance` educational fallback, and `Frankfurter v2` FX rates) with strict provenance tags (`LIVE`, `DELAYED`, `HISTORICAL`, `DAILY_REFERENCE`, `DATA_UNAVAILABLE`) and effective-dated ISO 10383 MIC symbology (including the scheduled **December 28, 2026 HNX-to-HOSE consolidation**).
    - Full IPO-to-present interactive candlestick charts (`1m` to `1mo`) with Volume Histogram and direct navigation to `Risk Analytics`.
 

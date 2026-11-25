@@ -227,7 +227,9 @@ class TestProvidersAndFastAPI(unittest.TestCase):
         mics = {row["exchange_mic"]: row for row in cov}
         self.assertEqual(mics["XNAS"]["phase"], "Phase 1")
         self.assertEqual(mics["XHAI"]["phase"], "Phase 1")
-        self.assertEqual(mics["XLON"]["coverage_status"], "NOT_SUPPORTED")
+        # Coverage is limited to US, Vietnam and Italy; Italy has no data with yfinance disabled.
+        self.assertEqual(set(mics), {"XNYS", "XNAS", "XSTC", "XHAI", "XUPC", "XMIL"})
+        self.assertEqual(mics["XMIL"]["coverage_status"], "NOT_SUPPORTED")
 
     def test_no_silent_fallback_for_vietnam_live_without_ssi_keys(self) -> None:
         client = self._build_test_client()
@@ -246,9 +248,13 @@ class TestProvidersAndFastAPI(unittest.TestCase):
         self.assertIsNotNone(q["retrieval_timestamp"])
         self.assertEqual(q["price"], 228.45)
 
-        # Phase 7 exchange must return DATA_UNAVAILABLE
+        # Italy without the educational fallback must return DATA_UNAVAILABLE (never invented)
+        it = client.get("/api/v1/market/quote/XMIL:ENI").json()
+        self.assertEqual(it["data_status"], "DATA_UNAVAILABLE")
+        # Exchanges that were removed are reported as not integrated
         uk = client.get("/api/v1/market/quote/XLON:HSBA").json()
         self.assertEqual(uk["data_status"], "DATA_UNAVAILABLE")
+        self.assertIn("not yet integrated", uk["unavailable_reason"])
 
         # Finnhub historical OHLCV with educational fallback disabled -> DATA_UNAVAILABLE
         ohlcv = client.get("/api/v1/market/ohlcv/XNAS:AAPL?allow_educational_fallback=false").json()

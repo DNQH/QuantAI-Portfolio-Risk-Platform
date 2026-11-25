@@ -156,19 +156,19 @@ def get_market_sector_blueprints(scope: MarketScope) -> MarketBlueprintResponse:
             ),
         ]
     else:
-        label = "Global Multi-Market (US + Vietnam + Europe + Asia + Australia)"
+        label = "Global Multi-Market (United States + Vietnam + Italy)"
         blueprints = [
             IndustryBlueprint(
                 name="Global Defensive Fortress",
                 sectors=["Consumer Defensive", "Utilities", "Financial Services", "Technology", "Basic Materials"],
-                rationale="Spans 5 currencies (USD, CHF, EUR, VND, AUD/SGD) and defensive sectors to maximize the Diversification Ratio.",
-                suggested_tickers=["XSWX:NESN", "XMIL:ENEL", "XSES:D05", "XNAS:MSFT", "XSTC:VNM", "XASX:BHP"],
+                rationale="Spans three currencies (USD, EUR, VND) and defensive sectors to maximize the Diversification Ratio.",
+                suggested_tickers=["XNAS:MSFT", "XMIL:ENEL", "XMIL:CPR", "XMIL:G", "XSTC:VNM", "XSTC:GAS"],
             ),
             IndustryBlueprint(
-                name="Global Four-Region Core",
+                name="Global Three-Market Core",
                 sectors=["Technology", "Financial Services", "Consumer Defensive", "Consumer Cyclical", "Energy"],
-                rationale="Balances North America, Europe, Japan/ASEAN, and Vietnam across uncorrelated macro cycles.",
-                suggested_tickers=["XNAS:AAPL", "XSWX:NESN", "XTKS:7203", "XSES:D05", "XSTC:GAS"],
+                rationale="Balances North America, Southern Europe (Italy) and Vietnam across less correlated macro and currency cycles.",
+                suggested_tickers=["XNAS:AAPL", "XNYS:JPM", "XMIL:RACE", "XMIL:ENI", "XSTC:FPT", "XSTC:VCB"],
             ),
         ]
 

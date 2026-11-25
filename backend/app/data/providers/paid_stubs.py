@@ -74,7 +74,7 @@ class EODHDProviderStub(_PaidProviderStub):
     capabilities = ProviderCapabilities(
         provider_id="eodhd",
         display_name="EODHD (Paid Global EOD/Intraday)",
-        supported_mics=("XNYS", "XNAS", "XLON", "XETR", "XPAR", "XSWX", "XTKS", "XHKG", "XSTC", "XASX"),
+        supported_mics=("XNYS", "XNAS", "XMIL", "XSTC"),
         supports_live_quotes=True,
         supports_websocket=True,
         supports_historical_ohlcv=True,
@@ -88,7 +88,7 @@ class TwelveDataProviderStub(_PaidProviderStub):
     capabilities = ProviderCapabilities(
         provider_id="twelvedata",
         display_name="Twelve Data (Paid Global Multi-Asset)",
-        supported_mics=("XNYS", "XNAS", "XLON", "XETR", "XPAR", "XSWX", "XTKS", "XHKG", "XASX"),
+        supported_mics=("XNYS", "XNAS", "XMIL"),
         supports_live_quotes=True,
         supports_websocket=True,
         supports_historical_ohlcv=True,

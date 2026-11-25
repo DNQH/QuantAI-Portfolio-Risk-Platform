@@ -61,7 +61,7 @@ class TestPhases3To7(unittest.TestCase):
         r = self.client.post(
             "/api/v1/portfolio/optimize",
             json={
-                "asset_price_maps": {"XNAS:AAPL": a_px, "XSTC:FPT": b_px, "XLON:HSBA": c_px},
+                "asset_price_maps": {"XNAS:AAPL": a_px, "XSTC:FPT": b_px, "XMIL:ENI": c_px},
                 "risk_free_rate_annual": 0.03,
                 "frontier_points": 10,
             },
@@ -199,11 +199,12 @@ class TestPhases3To7(unittest.TestCase):
     def test_phase7_global_expansion_symbology(self) -> None:
         global_list = search_seed_instruments(query="")
         mics = {i.exchange_mic for i in global_list}
-        for expected_mic in ("XNYS", "XNAS", "XSTC", "XHAI", "XLON", "XETR", "XPAR", "XSWX", "XTKS", "XHKG", "XSES", "XASX"):
-            self.assertIn(expected_mic, mics)
-        self.assertEqual(to_yfinance_symbol("7203", "XTKS"), "7203.T")
-        self.assertEqual(to_yfinance_symbol("HSBA", "XLON"), "HSBA.L")
-        self.assertEqual(to_yfinance_symbol("BHP", "XASX"), "BHP.AX")
+        # Supported markets: United States, Vietnam and Italy only.
+        self.assertEqual(mics, {"XNYS", "XNAS", "XSTC", "XHAI", "XUPC", "XMIL"})
+        self.assertEqual(to_yfinance_symbol("ENI", "XMIL"), "ENI.MI")
+        self.assertEqual(to_yfinance_symbol("STMMI", "XMIL"), "STMMI.MI")
+        self.assertEqual(to_yfinance_symbol("FPT", "XSTC"), "FPT.VN")
+        self.assertEqual(to_yfinance_symbol("AAPL", "XNAS"), "AAPL")
 
 
 if __name__ == "__main__":

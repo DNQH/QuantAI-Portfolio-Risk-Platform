@@ -23,5 +23,5 @@ All provider permissions below were verified against official documentation as o
 ### Requires Additional Credentials or Paid Subscriptions
 - **Verified Real-Time Vietnam Streaming (`LIVE`):** Requires an SSI trading account and a FastConnect Data registration; configure the ConsumerID / ConsumerSecret as `SSI_CONSUMER_ID` / `SSI_CONSUMER_SECRET` (fees: confirm with SSI).
 - **Licensed Historical US/Global OHLCV (Non-`yfinance`):** Requires a paid provider such as [EODHD](https://eodhd.com/pricing) ($19.99+/mo), [Twelve Data](https://twelvedata.com/news/march-2026-updates) ($79+/mo, student discount available), or [Massive](https://qveris.ai/guides/polygon-pricing-optimized) ($29–$199/mo for US).
-- **Real-Time European, Asian, ASEAN & Australian Equities (Phase 7):** Requires paid exchange-licensed feeds (EODHD / Twelve Data) and commercial display licenses if deployed publicly.
+- **Real-Time Italian Equities (Borsa Italiana / Euronext Milan):** Requires paid exchange-licensed feeds (EODHD / Twelve Data) and commercial display licenses if deployed publicly.
 - **Live Intraday FX Dealing Quotes (Bid/Ask):** Requires paid FX streaming tiers rather than Frankfurter v2 daily central-bank reference rates.
