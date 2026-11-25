@@ -2,7 +2,12 @@
 
 All notable changes to **QuantAI** are documented in this file.
 
-## [Unreleased]
+## [4.1.0] - 2026-11-25
+Quant-correctness, robustness, UI and public-deployment release. Public API shapes are
+backward compatible (only optional fields were added; `key_prefix` was removed from
+`/assistant/status`). Release notes:
+https://github.com/DNQH/QuantAI-Portfolio-Risk-Platform/releases/tag/v4.1.0
+
 ### Added — public web deployment
 - **Single-container deployment:** multi-stage `Dockerfile` builds the React UI and serves it
   from FastAPI on one port (`QUANTAI_FRONTEND_DIST`), with immutable caching for hashed
@@ -14,10 +19,13 @@ All notable changes to **QuantAI** are documented in this file.
   (per-minute plus a global daily budget). Returns `429` with `Retry-After`.
 - `backend/requirements-deploy.txt` (runtime + yfinance) and a CI job that builds the image.
 
-## [4.1.0] - 2026-11-25
-Quant-correctness, robustness and engineering hardening release. Public API shapes are
-backward compatible (only optional fields were added; `key_prefix` was removed from
-`/assistant/status`).
+### Fixed — user interface
+- **Narrow screens:** the fixed 256 px sidebar left ~150 px for content on phone-width
+  viewports. Below the `md` breakpoint it now collapses into a top bar with a horizontally
+  scrollable tab strip that keeps the active tab in view; the desktop sidebar is sticky.
+- **Tab lost on refresh:** the active tab lived only in React state, so every reload jumped
+  back to Overview. It is now mirrored to the URL hash (e.g. `#risk-analytics`), enabling
+  refresh persistence, browser Back/Forward and deep links; the page title follows the tab.
 
 ### Fixed — quantitative correctness
 - **Portfolio backtest look-ahead bias:** optimised weights were calibrated on the first
