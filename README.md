@@ -47,3 +47,17 @@
 1. **Backend:** `cd backend && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt && python -m uvicorn app.main:app --reload --port 8000`
 2. **Frontend (new terminal):** `cd frontend && npm install && npm run dev`
 3. Open `http://localhost:5173`. Run tests anytime via `cd backend && pip install -r requirements-dev.txt && python -m pytest -q && ruff check .`.
+
+### Run as a single container (production mode)
+
+```bash
+docker build -t quantai . && docker run --rm -p 8000:8000 quantai
+```
+
+Open `http://localhost:8000`: the API also serves the built UI, with per-IP rate limits on.
+
+## Deploy to the Web
+
+The repository includes a `Dockerfile` (API + UI on one port) and a Render Blueprint
+(`render.yaml`). On Render: **New → Blueprint → select this repo → Apply**. Full guide,
+configuration table and known limitations: [`docs/deployment.md`](docs/deployment.md).

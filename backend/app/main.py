@@ -13,6 +13,8 @@ from app import __version__
 from app.api.routes import router as v1_router
 from app.core.config import Settings, get_settings
 from app.core.database import DatabaseManager
+from app.core.ratelimit import RateLimitConfig, install_rate_limiting
+from app.core.static_site import mount_frontend
 from app.data.registry import MarketDataRegistry
 from app.portfolio.optimizer import PortfolioStore
 
@@ -73,8 +75,27 @@ def create_app(
     app.state.registry = registry or MarketDataRegistry(settings=cfg)
     app.state.portfolio_store = PortfolioStore(db)
 
+    if cfg.rate_limit_enabled:
+        install_rate_limiting(
+            app,
+            RateLimitConfig(
+                general_per_minute=cfg.rate_limit_per_minute,
+                heavy_per_minute=cfg.rate_limit_heavy_per_minute,
+                assistant_per_minute=cfg.assistant_per_minute,
+                assistant_per_day=cfg.assistant_daily_budget,
+            ),
+        )
+
     app.include_router(v1_router)
-    logger.info("QuantAI API initialized (version=%s, env=%s)", app.version, cfg.environment)
+    # Must come after the API router: the SPA fallback is a catch-all GET route.
+    ui = mount_frontend(app, cfg.frontend_dist)
+    logger.info(
+        "QuantAI API initialized (version=%s, env=%s, ui=%s, rate_limit=%s)",
+        app.version,
+        cfg.environment,
+        "on" if ui else "off",
+        "on" if cfg.rate_limit_enabled else "off",
+    )
     return app
 
 
