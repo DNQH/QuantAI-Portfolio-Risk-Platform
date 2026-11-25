@@ -23,9 +23,18 @@ applied per real visitor IP.
 
 1. Sign in at <https://render.com> with your GitHub account.
 2. **New → Blueprint**, pick the `QuantAI-Portfolio-Risk-Platform` repository, branch `main`.
-3. Render reads `render.yaml` and asks for the secret values:
-   * `GEMINI_API_KEY`: optional; leave empty to disable the AI assistant.
-   * `FINNHUB_API_KEY`: optional; leave empty to skip Finnhub quotes.
+3. Render reads `render.yaml` and asks for the secret values. All are optional; any market
+   without a key falls back to yfinance and shows **DELAYED** in *Market Data Coverage*:
+
+   | Variable | Unlocks |
+   |---|---|
+   | `GEMINI_API_KEY` | AI portfolio assistant |
+   | `FINNHUB_API_KEY` | **LIVE** status for NYSE / NASDAQ |
+   | `TWELVEDATA_API_KEY` (or `EODHD_API_KEY`) | **LIVE** status for LSE, Xetra, TSE, HKEX, SGX, ASX |
+   | `SSI_API_KEY` + `SSI_API_SECRET` | **LIVE** status for HOSE / HNX / UPCOM (SSI brokerage account) |
+
+   Keys can also be added or changed later under the service's **Environment** tab
+   (saving triggers a redeploy).
 4. Click **Apply** / **Deploy**. The first build takes a few minutes; progress is in the
    service's **Logs** tab. The log line
    `QuantAI API initialized (... env=production, ui=on, rate_limit=on)` means it is up.
@@ -63,7 +72,7 @@ deployment:
 | `QUANTAI_RATE_LIMIT_HEAVY_PER_MINUTE` | `20` | Simulations, backtests, forecasts, sentiment, credit, tracker |
 | `QUANTAI_ASSISTANT_PER_MINUTE` | `6` | Gemini assistant, per client IP |
 | `QUANTAI_ASSISTANT_DAILY_BUDGET` | `200` | Gemini assistant, **all visitors combined**, per UTC day |
-| `GEMINI_API_KEY`, `FINNHUB_API_KEY` | unset | Optional provider keys; set them as host secrets, never in Git |
+| `GEMINI_API_KEY`, `FINNHUB_API_KEY`, `TWELVEDATA_API_KEY`, `EODHD_API_KEY`, `SSI_API_KEY`, `SSI_API_SECRET` | unset | Optional provider keys (see table above); set them as host secrets, never in Git |
 
 A value of `0` disables a limit. Throttled requests get HTTP `429` with a `Retry-After`
 header and a human-readable `detail` message that the UI displays.
