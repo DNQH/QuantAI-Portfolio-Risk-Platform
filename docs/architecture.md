@@ -10,7 +10,7 @@ quantai/
 │   │   ├── api/          # FastAPI REST & WebSocket routers (OpenAPI / Swagger)
 │   │   ├── core/         # Env config, Pydantic schemas, SQLite DB, MIC symbology, market calendars
 │   │   ├── data/         # BaseMarketDataProvider, Freshness State Machine, multi-provider router
-│   │   │   └── providers/# Finnhub, Vnstock v6, SSI FastConnect V3, yfinance fallback, paid stubs
+│   │   │   └── providers/# Finnhub, Vnstock v6, SSI FastConnect Data, yfinance fallback, paid stubs
 │   │   ├── fx/           # Frankfurter v2 daily reference FX engine (15 target currencies)
 │   │   ├── analytics/    # Phase 2: Returns, indicators, statistics, Sharpe/Sortino, drawdown, matrices
 │   │   ├── portfolio/    # Phase 3: MPT Efficient Frontier, Min-Var, Max-Sharpe, CAPM

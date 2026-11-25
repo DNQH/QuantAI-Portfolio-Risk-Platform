@@ -4,6 +4,16 @@ All notable changes to **QuantAI** are documented in this file.
 
 ## [Unreleased]
 ### Fixed
+- **SSI FastConnect adapter rewritten for the real FC Data API v2.** The previous adapter
+  called endpoints that do not exist (`/api/v3/auth/token` with `apiKey`/`apiSecret`,
+  `/market/quote`), so Vietnam quotes could never be LIVE even with valid credentials. It now:
+  authenticates via `POST api/v2/Market/AccessToken` (`consumerID`/`consumerSecret`) with JWT
+  expiry-aware token caching and one re-auth on HTTP 401; takes the last matched trade from
+  `Market/IntradayOhlc` (LIVE only if the trade is <= 3 min old during the session, otherwise
+  DELAYED with its real age); and serves daily history from `Market/DailyOhlc` (yearly windows,
+  paginated). HOSE, HNX and UPCOM are covered; SSI is now the first source for Vietnam daily
+  history when configured. Verified against SSI's documentation and the official `ssi-fc-data`
+  SDK with 11 fake-server tests; not yet exercised against SSI with real credentials.
 - **Misleading LIVE badges in Market Data Coverage:** a Twelve Data or EODHD API key alone
   flipped LSE, Xetra, TSE, HKEX, SGX and ASX to **LIVE** ("Twelve Data (Live Global)"), although
   quotes for those exchanges are always served by yfinance (delayed) and the paid quote
@@ -16,6 +26,9 @@ All notable changes to **QuantAI** are documented in this file.
   tests (a real Gemini call previously ran from the assistant test).
 
 ### Changed
+- SSI credentials are now `SSI_CONSUMER_ID` / `SSI_CONSUMER_SECRET` (legacy `SSI_API_KEY` /
+  `SSI_API_SECRET` still accepted). Provider id `ssi_fastconnect_v3` renamed to
+  `ssi_fastconnect_data` (also the key in `/api/v1/health` `configured_providers`).
 - **Market Data Coverage UI:** the "Feed Status" column is now "Best Available Feed", with an
   explainer that LIVE applies while the exchange is open (other pages show each quote's real
   age, e.g. `DELAYED (968m)` before the US open); provider notes appear as a tooltip.

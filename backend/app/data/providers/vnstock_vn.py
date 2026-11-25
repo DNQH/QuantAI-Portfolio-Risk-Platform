@@ -21,7 +21,7 @@ class VnstockProvider(BaseMarketDataProvider):
         provider_id="vnstock_v6",
         display_name="Vnstock v6 (Vietnam Equities)",
         supported_mics=("XSTC", "XHAI"),
-        supports_live_quotes=False,  # Live verified streaming is delegated to SSI FastConnect V3
+        supports_live_quotes=False,  # Live verified streaming is delegated to SSI FastConnect Data
         supports_websocket=False,
         supports_historical_ohlcv=True,
         is_educational_fallback_only=False,
